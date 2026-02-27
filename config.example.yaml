@@ -1,0 +1,50 @@
+server:
+  # Port the runner listens on. Default: 7777
+  port: 7777
+
+  # API key for authenticating requests from Docked.
+  # Leave empty to auto-generate on first run (key is printed to stdout
+  # and persisted to /var/lib/docked-runner/.api_key).
+  # Override with env var: DOCKED_RUNNER_API_KEY
+  api_key: ""
+
+  # Enable TLS (self-signed cert auto-generated). Default: false
+  tls: false
+
+runner:
+  # Display name shown in the Docked UI.
+  # Defaults to the system hostname. Override with: DOCKED_RUNNER_NAME
+  name: "my-host"
+
+  # Optional: URL of your Docked server. When set, the runner will
+  # announce itself on startup so you don't have to add it manually.
+  # docked_url: "http://docked:3000"
+
+docker:
+  # Set to false to disable Docker container management entirely.
+  enabled: true
+
+  # Unix socket path. Default: /var/run/docker.sock
+  # When running inside a container, mount the host socket:
+  #   -v /var/run/docker.sock:/var/run/docker.sock
+  socket: "/var/run/docker.sock"
+
+  # "docker" uses the Compose v2 plugin (docker compose ...).
+  # "docker-compose" uses the standalone v1 binary.
+  compose_binary: "docker"
+
+# Named operations — command templates the runner can execute.
+# These are defined on the HOST (never exposed through the UI).
+# The UI only sees the name and description; the command stays here.
+#
+# operations:
+#   update:
+#     command: "bash /opt/update.sh"
+#     description: "Update this service to the latest version"
+#     timeout: 300        # seconds (default: 300)
+#     working_dir: "/"    # working directory for the command
+#
+#   restart:
+#     command: "systemctl restart myapp"
+#     description: "Restart the service"
+#     timeout: 30
