@@ -81,7 +81,13 @@ func (r *Runner) Run(ctx context.Context, name string, output func(string)) (*Ru
 	// running the command directly on the host.
 	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", op.Command)
 	cmd.Dir = workDir
-	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
+	env := os.Environ()
+	// Ensure HOME is set — systemd services often omit it, but many tools
+	// (e.g. Ollama) panic without it.
+	if os.Getenv("HOME") == "" {
+		env = append(env, "HOME=/root")
+	}
+	cmd.Env = append(env, "TERM=xterm-256color")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
