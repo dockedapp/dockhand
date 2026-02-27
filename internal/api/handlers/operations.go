@@ -21,10 +21,10 @@ func NewOperationHandlers(ops map[string]config.Operation, runner *operations.Ru
 
 // OperationSummary is the list-view representation of an operation.
 type OperationSummary struct {
-	Name        string                     `json:"name"`
-	Description string                     `json:"description"`
-	Active      bool                       `json:"active"`
-	LastRun     *operations.HistoryRecord  `json:"lastRun,omitempty"`
+	Name        string                    `json:"name"`
+	Description string                    `json:"description"`
+	Active      bool                      `json:"active"`
+	LastRun     *operations.HistoryRecord `json:"lastRun,omitempty"`
 }
 
 // List handles GET /operations
@@ -49,12 +49,7 @@ func (h *opHandlers) Run(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	stream, ok := sse.New(w)
-	if !ok {
-		httpError(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
-
+	stream := sse.New(w)
 	stream.Send("start", name)
 
 	result, err := h.runner.Run(r.Context(), name, func(line string) {
@@ -94,4 +89,3 @@ func (h *opHandlers) History(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"history": records})
 }
-

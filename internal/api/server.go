@@ -103,3 +103,9 @@ func (rw *responseWriter) Flush() {
 		f.Flush()
 	}
 }
+
+// Unwrap returns the underlying ResponseWriter so http.ResponseController
+// can discover Flusher/Hijacker on the original writer.
+func (rw *responseWriter) Unwrap() http.ResponseWriter {
+	return rw.ResponseWriter
+}
