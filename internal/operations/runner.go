@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"os"
 	"os/exec"
 	"strings"
 	"sync"
@@ -79,6 +80,7 @@ func (r *Runner) Run(ctx context.Context, name string, output func(string)) (*Ru
 	// Split command string into args via shell — use sh -c to support pipes, etc.
 	cmd := exec.CommandContext(ctx, "sh", "-c", op.Command)
 	cmd.Dir = workDir
+	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
