@@ -62,11 +62,7 @@ func (h *containerHandlers) Get(w http.ResponseWriter, r *http.Request) {
 func (h *containerHandlers) Upgrade(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
 
-	stream, ok := sse.New(w)
-	if !ok {
-		httpError(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
+	stream := sse.New(w)
 
 	stream.Send("start", id)
 
@@ -81,10 +77,10 @@ func (h *containerHandlers) Upgrade(w http.ResponseWriter, r *http.Request) {
 	}
 
 	stream.SendJSON("result", map[string]any{
-		"strategy":         result.Strategy,
-		"oldImage":         result.OldImage,
-		"newImage":         result.NewImage,
-		"durationSeconds":  result.Duration.Seconds(),
+		"strategy":        result.Strategy,
+		"oldImage":        result.OldImage,
+		"newImage":        result.NewImage,
+		"durationSeconds": result.Duration.Seconds(),
 	})
 	stream.Done(0)
 }
@@ -95,11 +91,7 @@ func (h *containerHandlers) Logs(w http.ResponseWriter, r *http.Request) {
 	tail := r.URL.Query().Get("tail")
 	follow := r.URL.Query().Get("follow") == "true"
 
-	stream, ok := sse.New(w)
-	if !ok {
-		httpError(w, "streaming not supported", http.StatusInternalServerError)
-		return
-	}
+	stream := sse.New(w)
 
 	opts := docker.LogOptions{Tail: tail, Follow: follow}
 	err := h.dc.StreamLogs(r.Context(), id, opts, func(line string) {
