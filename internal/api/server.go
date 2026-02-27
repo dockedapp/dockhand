@@ -1,0 +1,99 @@
+package api
+
+import (
+	"context"
+	"fmt"
+	"log"
+	"net/http"
+	"time"
+
+	"github.com/dockedapp/dockhand/internal/api/handlers"
+	"github.com/dockedapp/dockhand/internal/api/middleware"
+	"github.com/dockedapp/dockhand/internal/config"
+	"github.com/dockedapp/dockhand/internal/docker"
+	"github.com/dockedapp/dockhand/internal/operations"
+)
+
+// Server is the HTTP server for the runner API.
+type Server struct {
+	httpServer *http.Server
+	cfg        *config.Config
+}
+
+// New constructs the HTTP server, wires all routes, and returns it ready to start.
+func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner) *Server {
+	mux := http.NewServeMux()
+
+	auth := middleware.Auth(cfg.Server.APIKey)
+
+	// Health — unauthenticated so Docked can probe before a key is set
+	dockerOK := func() bool {
+		if dc == nil {
+			return false
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+		defer cancel()
+		return dc.Ping(ctx) == nil
+	}
+	mux.HandleFunc("GET /health", handlers.Health(Version, cfg.Runner.Name, dockerOK))
+
+	// Container routes (only registered if Docker is enabled)
+	if dc != nil && cfg.Docker.Enabled {
+		ch := handlers.NewContainerHandlers(dc, cfg.Docker.ComposeBinary)
+		mux.Handle("GET /containers", auth(http.HandlerFunc(ch.List)))
+		mux.Handle("GET /containers/{id}", auth(http.HandlerFunc(ch.Get)))
+		mux.Handle("POST /containers/{id}/upgrade", auth(http.HandlerFunc(ch.Upgrade)))
+		mux.Handle("GET /containers/{id}/logs", auth(http.HandlerFunc(ch.Logs)))
+	}
+
+	// Operation routes (only registered if operations are defined)
+	if len(cfg.Operations) > 0 {
+		oh := handlers.NewOperationHandlers(cfg.Operations, runner)
+		mux.Handle("GET /operations", auth(http.HandlerFunc(oh.List)))
+		mux.Handle("POST /operations/{name}/run", auth(http.HandlerFunc(oh.Run)))
+		mux.Handle("GET /operations/{name}/history", auth(http.HandlerFunc(oh.History)))
+	}
+
+	httpServer := &http.Server{
+		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
+		Handler:      loggingMiddleware(mux),
+		ReadTimeout:  15 * time.Second,
+		WriteTimeout: 0, // disabled — SSE streams are long-lived
+		IdleTimeout:  60 * time.Second,
+	}
+
+	return &Server{httpServer: httpServer, cfg: cfg}
+}
+
+// Start begins listening. Blocks until the server stops.
+func (s *Server) Start() error {
+	log.Printf("docked-runner listening on :%d  (runner: %s)", s.cfg.Server.Port, s.cfg.Runner.Name)
+	return s.httpServer.ListenAndServe()
+}
+
+// Shutdown gracefully stops the server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	return s.httpServer.Shutdown(ctx)
+}
+
+// Version is set at build time via -ldflags.
+var Version = "dev"
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		rw := &responseWriter{ResponseWriter: w, status: http.StatusOK}
+		next.ServeHTTP(rw, r)
+		log.Printf("%s %s %d %s", r.Method, r.URL.Path, rw.status, time.Since(start))
+	})
+}
+
+type responseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (rw *responseWriter) WriteHeader(code int) {
+	rw.status = code
+	rw.ResponseWriter.WriteHeader(code)
+}

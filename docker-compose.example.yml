@@ -1,0 +1,21 @@
+services:
+  dockhand:
+    image: ghcr.io/dockedapp/dockhand:latest
+    container_name: dockhand
+    restart: unless-stopped
+    ports:
+      - "7777:7777"
+    volumes:
+      # Docker socket — required for container management
+      - /var/run/docker.sock:/var/run/docker.sock
+      # Config file (copy config.example.yaml → config.yaml and edit)
+      - ./config.yaml:/etc/dockhand/config.yaml:ro
+      # Persistent data (API key, operation history)
+      - dockhand-data:/var/lib/dockhand
+    environment:
+      # Optionally override the API key via env instead of config file:
+      # - DOCKHAND_API_KEY=your-secret-key
+      - TZ=America/New_York
+
+volumes:
+  dockhand-data:
