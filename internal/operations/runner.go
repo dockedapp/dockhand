@@ -77,8 +77,9 @@ func (r *Runner) Run(ctx context.Context, name string, output func(string)) (*Ru
 		workDir = "/"
 	}
 
-	// Split command string into args via shell — use sh -c to support pipes, etc.
-	cmd := exec.CommandContext(ctx, "sh", "-c", op.Command)
+	// Run via login shell so PATH and profile env vars are available, same as
+	// running the command directly on the host.
+	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", op.Command)
 	cmd.Dir = workDir
 	cmd.Env = append(os.Environ(), "TERM=xterm-256color")
 
