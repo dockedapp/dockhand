@@ -46,6 +46,10 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner) *Serv
 		mux.Handle("GET /containers/{id}/logs", auth(http.HandlerFunc(ch.Logs)))
 	}
 
+	// System routes — update and uninstall (always registered, authenticated)
+	mux.Handle("POST /update", auth(http.HandlerFunc(handlers.Update)))
+	mux.Handle("POST /uninstall", auth(http.HandlerFunc(handlers.Uninstall)))
+
 	// Operation routes (only registered if operations are defined)
 	if len(cfg.Operations) > 0 {
 		oh := handlers.NewOperationHandlers(cfg.Operations, runner)
