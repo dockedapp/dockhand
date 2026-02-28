@@ -55,7 +55,7 @@ func main() {
 	}
 	defer histDB.Close()
 
-	runner := operations.NewRunner(cfg.Operations, histDB)
+	runner := operations.NewRunner(cfg.Operations, histDB, *configPath)
 
 	// HTTP server
 	srv := api.New(cfg, dc, runner)
