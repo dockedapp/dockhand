@@ -14,6 +14,7 @@ import (
 	"github.com/dockedapp/dockhand/internal/api"
 	"github.com/dockedapp/dockhand/internal/config"
 	"github.com/dockedapp/dockhand/internal/docker"
+	"github.com/dockedapp/dockhand/internal/enrollment"
 	"github.com/dockedapp/dockhand/internal/operations"
 )
 
@@ -25,6 +26,10 @@ func main() {
 	if err != nil {
 		log.Fatalf("config error: %v", err)
 	}
+
+	// Attempt enrollment with Docked server (no-ops if already registered
+	// or no enrollment token is configured).
+	enrollment.Run(cfg, *configPath)
 
 	// Docker client (optional — skipped if Docker is disabled or unavailable)
 	var dc *docker.Client

@@ -21,9 +21,9 @@ const (
 )
 
 type Config struct {
-	Server     ServerConfig        `yaml:"server"`
-	Runner     RunnerConfig        `yaml:"runner"`
-	Docker     DockerConfig        `yaml:"docker"`
+	Server     ServerConfig         `yaml:"server"`
+	Runner     RunnerConfig         `yaml:"runner"`
+	Docker     DockerConfig         `yaml:"docker"`
 	Operations map[string]Operation `yaml:"operations"`
 }
 
@@ -34,8 +34,9 @@ type ServerConfig struct {
 }
 
 type RunnerConfig struct {
-	Name      string `yaml:"name"`
-	DockedURL string `yaml:"docked_url"`
+	Name            string `yaml:"name"`
+	DockedURL       string `yaml:"docked_url"`
+	EnrollmentToken string `yaml:"enrollment_token"`
 }
 
 type DockerConfig struct {
@@ -136,6 +137,9 @@ func applyEnvOverrides(cfg *Config) {
 	if v := os.Getenv("DOCKED_RUNNER_DOCKED_URL"); v != "" {
 		cfg.Runner.DockedURL = v
 	}
+	if v := os.Getenv("DOCKED_RUNNER_ENROLLMENT_TOKEN"); v != "" {
+		cfg.Runner.EnrollmentToken = v
+	}
 	if v := os.Getenv("DOCKER_HOST"); v != "" {
 		cfg.Docker.Socket = v
 	}
@@ -189,4 +193,35 @@ func generateKey() (string, error) {
 func DataDir() string {
 	_ = os.MkdirAll(dataDir, 0755)
 	return dataDir
+}
+
+// ClearEnrollmentToken re-reads the config file, removes the enrollment_token
+// field, and writes the file back. This is called after successful enrollment.
+func ClearEnrollmentToken(path string) error {
+	if path == "" {
+		return nil
+	}
+
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("reading config to clear token: %w", err)
+	}
+
+	// Parse into a generic map to preserve all other fields
+	var raw map[string]interface{}
+	if err := yaml.Unmarshal(data, &raw); err != nil {
+		return fmt.Errorf("parsing config to clear token: %w", err)
+	}
+
+	// Remove enrollment_token from the runner section
+	if runner, ok := raw["runner"].(map[string]interface{}); ok {
+		delete(runner, "enrollment_token")
+	}
+
+	out, err := yaml.Marshal(raw)
+	if err != nil {
+		return fmt.Errorf("marshaling config: %w", err)
+	}
+
+	return os.WriteFile(path, out, 0600)
 }
