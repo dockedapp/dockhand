@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"os/exec"
+	"os/user"
 	"strings"
 	"sync"
 	"time"
@@ -85,7 +86,11 @@ func (r *Runner) Run(ctx context.Context, name string, output func(string)) (*Ru
 	// Ensure HOME is set — systemd services often omit it, but many tools
 	// (e.g. Ollama) panic without it.
 	if os.Getenv("HOME") == "" {
-		env = append(env, "HOME=/root")
+		home := "/root" // last-resort fallback
+		if u, err := user.Current(); err == nil && u.HomeDir != "" {
+			home = u.HomeDir
+		}
+		env = append(env, "HOME="+home)
 	}
 	cmd.Env = append(env, "TERM=xterm-256color")
 
