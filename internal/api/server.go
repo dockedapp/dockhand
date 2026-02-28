@@ -51,17 +51,16 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, confi
 	mux.Handle("POST /uninstall", auth(http.HandlerFunc(handlers.Uninstall)))
 	mux.Handle("POST /reload", auth(handlers.Reload(configPath, runner)))
 
-	// Operation routes (only registered if operations are defined)
-	// NOTE: static paths (/operations/history) must be registered before
-	// parameterised paths (/operations/{name}/...) to avoid ambiguity.
-	if len(cfg.Operations) > 0 {
-		oh := handlers.NewOperationHandlers(cfg.Operations, runner)
-		mux.Handle("GET /operations", auth(http.HandlerFunc(oh.List)))
-		mux.Handle("GET /operations/history", auth(http.HandlerFunc(oh.AllHistory)))
-		mux.Handle("POST /operations/{name}/run", auth(http.HandlerFunc(oh.Run)))
-		mux.Handle("DELETE /operations/{name}/run", auth(http.HandlerFunc(oh.Cancel)))
-		mux.Handle("GET /operations/{name}/history", auth(http.HandlerFunc(oh.History)))
-	}
+	// Operation routes — always registered so they work even when config.yaml
+	// has no operations yet (e.g. fresh install) and after POST /reload adds some.
+	// NOTE: static paths (/operations/history) must come before parameterised
+	// paths (/operations/{name}/...) to avoid ambiguity.
+	oh := handlers.NewOperationHandlers(cfg.Operations, runner)
+	mux.Handle("GET /operations", auth(http.HandlerFunc(oh.List)))
+	mux.Handle("GET /operations/history", auth(http.HandlerFunc(oh.AllHistory)))
+	mux.Handle("POST /operations/{name}/run", auth(http.HandlerFunc(oh.Run)))
+	mux.Handle("DELETE /operations/{name}/run", auth(http.HandlerFunc(oh.Cancel)))
+	mux.Handle("GET /operations/{name}/history", auth(http.HandlerFunc(oh.History)))
 
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
