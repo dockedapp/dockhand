@@ -74,21 +74,35 @@ docker:
   socket: "/var/run/docker.sock"
   compose_binary: "docker"   # "docker" = Compose v2 plugin; "docker-compose" = v1
 
-# Named operations — defined here, invisible to Docked UI (only name/description shown)
+# Named operations — command stays on the host, only name/description exposed to Docked UI.
 # operations:
-#   update:
-#     command: "bash /opt/update.sh"
-#     description: "Update this service"
-#     timeout: 300
+#   deploy:
+#     command: "bash /opt/deploy.sh"
+#     description: "Deploy latest build"
+#     timeout: 300          # seconds; default 300
 #     working_dir: "/"
+#
+#     # Optional: version tracking (Tier 2 — GitHub releases)
+#     current_version: "v1.4.2"
+#     version_source:
+#       type: github
+#       repo: myorg/my-app
+#
+#     # Optional: version tracking (Tier 3 — dynamic command)
+#     # Runs on startup and after each successful run; result written back here.
+#     version_command: "myapp --version | awk '{print $2}'"
 ```
 
-All `server.*` keys can be overridden with environment variables:
+All config keys can be overridden with environment variables:
 
 | Env var | Config key |
 |---|---|
-| `DOCKHAND_API_KEY` | `server.api_key` |
-| `DOCKHAND_NAME` | `runner.name` |
+| `DOCKED_RUNNER_API_KEY` | `server.api_key` |
+| `DOCKED_RUNNER_PORT` | `server.port` |
+| `DOCKED_RUNNER_NAME` | `runner.name` |
+| `DOCKED_RUNNER_DOCKED_URL` | `runner.docked_url` |
+| `DOCKED_RUNNER_ENROLLMENT_TOKEN` | `runner.enrollment_token` |
+| `DOCKER_HOST` | `docker.socket` |
 
 ## API
 
@@ -97,13 +111,18 @@ All endpoints except `GET /health` require `Authorization: Bearer <api_key>`.
 | Method | Path | Description |
 |---|---|---|
 | `GET` | `/health` | Version, uptime, Docker status |
-| `GET` | `/containers` | List all containers |
+| `GET` | `/containers` | List all running + stopped containers |
 | `GET` | `/containers/{id}` | Single container detail |
 | `POST` | `/containers/{id}/upgrade` | Upgrade a container (SSE stream) |
 | `GET` | `/containers/{id}/logs` | Tail container logs (SSE stream) |
-| `GET` | `/operations` | List configured operations |
+| `GET` | `/operations` | List configured operations with last-run info |
 | `POST` | `/operations/{name}/run` | Run a named operation (SSE stream) |
-| `GET` | `/operations/{name}/history` | Execution history for an operation |
+| `DELETE` | `/operations/{name}/run` | Cancel a currently running operation |
+| `GET` | `/operations/history` | Recent run history across all operations |
+| `GET` | `/operations/{name}/history` | Execution history for a specific operation |
+| `POST` | `/update` | Download and apply a new dockhand binary, then restart |
+| `POST` | `/uninstall` | Remove dockhand from the host (disables service, deletes all files) |
+| `POST` | `/reload` | Hot-reload `config.yaml` without restarting (operations only) |
 
 ## Building from source
 
@@ -117,8 +136,43 @@ go build -o dockhand ./cmd/runner
 **Build with version embedded:**
 
 ```bash
-go build -ldflags="-s -w -X github.com/dockedapp/dockhand/internal/api.Version=1.0.0" \
-  -o dockhand ./cmd/runner
+go build \
+  -ldflags="-s -w -X github.com/dockedapp/dockhand/internal/api.Version=v0.1.7" \
+  -o dockhand \
+  ./cmd/runner
+```
+
+**Cross-compile release binaries locally** (requires `CGO_ENABLED=0`):
+
+```bash
+VERSION=v0.1.7
+
+CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+  go build -ldflags="-s -w -X github.com/dockedapp/dockhand/internal/api.Version=$VERSION" \
+  -o dockhand-linux-amd64 ./cmd/runner
+
+CGO_ENABLED=0 GOOS=linux GOARCH=arm64 \
+  go build -ldflags="-s -w -X github.com/dockedapp/dockhand/internal/api.Version=$VERSION" \
+  -o dockhand-linux-arm64 ./cmd/runner
+
+CGO_ENABLED=0 GOOS=linux GOARCH=arm GOARM=7 \
+  go build -ldflags="-s -w -X github.com/dockedapp/dockhand/internal/api.Version=$VERSION" \
+  -o dockhand-linux-armv7 ./cmd/runner
+```
+
+## Releasing
+
+Releases are automated via GitHub Actions (`.github/workflows/ci.yml`). Pushing a `v*` tag triggers the full pipeline:
+
+1. **Build & vet** — `go build ./...` + `go vet ./...`
+2. **Binaries** — cross-compiled for `linux/amd64`, `linux/arm64`, `linux/armv7` with version embedded via `-ldflags`
+3. **Docker image** — built and pushed to `ghcr.io/dockedapp/dockhand`
+4. **Release** — artifacts uploaded, `SHA256SUMS` generated, GitHub release created with auto-generated notes
+
+```bash
+# Tag and release
+git tag v0.1.7
+git push origin v0.1.7
 ```
 
 ## Docker image
@@ -130,5 +184,5 @@ Images are published to the GitHub Container Registry on every push to `main` an
 docker pull ghcr.io/dockedapp/dockhand:latest
 
 # Pinned version
-docker pull ghcr.io/dockedapp/dockhand:v1.0.0
+docker pull ghcr.io/dockedapp/dockhand:v0.1.7
 ```

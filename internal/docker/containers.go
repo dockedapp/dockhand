@@ -85,7 +85,7 @@ func buildRepoDigestsMap(ctx context.Context, dc *Client) map[string][]string {
 // InspectContainer returns the ContainerInfo for a single container by ID or name.
 // Returns nil, nil when the container is not found.
 func (dc *Client) InspectContainer(ctx context.Context, id string) (*ContainerInfo, error) {
-	all, err := dc.c.ContainerList(ctx, container.ListOptions{})
+	all, err := dc.c.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return nil, err
 	}

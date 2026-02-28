@@ -121,6 +121,48 @@ func (d *DB) ListHistory(name string, limit int) ([]HistoryRecord, error) {
 	return records, rows.Err()
 }
 
+// ListAllHistory returns up to limit records across all operations, newest first.
+func (d *DB) ListAllHistory(limit int) ([]HistoryRecord, error) {
+	if limit <= 0 {
+		limit = 50
+	}
+	rows, err := d.db.Query(
+		`SELECT id, operation_name, started_at, finished_at, exit_code, output
+		   FROM operation_history
+		  ORDER BY started_at DESC
+		  LIMIT ?`,
+		limit,
+	)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var records []HistoryRecord
+	for rows.Next() {
+		var r HistoryRecord
+		var startedUnix int64
+		var finishedUnix sql.NullInt64
+		var exitCode sql.NullInt64
+
+		if err := rows.Scan(&r.ID, &r.OperationName, &startedUnix,
+			&finishedUnix, &exitCode, &r.Output); err != nil {
+			return nil, err
+		}
+		r.StartedAt = time.Unix(startedUnix, 0)
+		if finishedUnix.Valid {
+			t := time.Unix(finishedUnix.Int64, 0)
+			r.FinishedAt = &t
+		}
+		if exitCode.Valid {
+			c := int(exitCode.Int64)
+			r.ExitCode = &c
+		}
+		records = append(records, r)
+	}
+	return records, rows.Err()
+}
+
 // Prune removes old history records, keeping the most recent maxHistoryPerOperation per operation.
 func (d *DB) Prune(name string) error {
 	_, err := d.db.Exec(`

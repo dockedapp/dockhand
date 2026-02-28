@@ -21,8 +21,9 @@ import (
 type Runner struct {
 	ops          map[string]config.Operation
 	history      *DB
-	mu           sync.Mutex // guards activeRuns and ops
+	mu           sync.Mutex // guards active, cancels, and ops
 	active       map[string]bool
+	cancels      map[string]context.CancelFunc
 	versionCache *VersionCache
 	configPath   string
 }
@@ -34,6 +35,7 @@ func NewRunner(ops map[string]config.Operation, history *DB, configPath string) 
 		ops:          ops,
 		history:      history,
 		active:       make(map[string]bool),
+		cancels:      make(map[string]context.CancelFunc),
 		versionCache: NewVersionCache(),
 		configPath:   configPath,
 	}
@@ -53,8 +55,8 @@ func (r *Runner) CurrentVersion(name string) string {
 	return r.ops[name].CurrentVersion
 }
 
-// warmVersionCache runs version_command for each operation on startup,
-// caches the result, and writes it back to the YAML config.
+// warmVersionCache runs version_command for all operations in parallel on startup,
+// caches each result, and writes it back to the YAML config.
 func (r *Runner) warmVersionCache() {
 	r.mu.Lock()
 	ops := make(map[string]config.Operation, len(r.ops))
@@ -63,26 +65,32 @@ func (r *Runner) warmVersionCache() {
 	}
 	r.mu.Unlock()
 
+	var wg sync.WaitGroup
 	for name, op := range ops {
 		if op.VersionCommand == "" {
 			continue
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-		v, err := r.runVersionCommand(ctx, op)
-		cancel()
-		if err != nil || v == "" {
-			continue
-		}
-		r.versionCache.Set(name, v)
-		if err := config.UpdateOperationVersion(r.configPath, name, v); err != nil {
-			log.Printf("version write-back failed for %q: %v", name, err)
-		}
-		r.mu.Lock()
-		updated := r.ops[name]
-		updated.CurrentVersion = v
-		r.ops[name] = updated
-		r.mu.Unlock()
+		wg.Add(1)
+		go func(name string, op config.Operation) {
+			defer wg.Done()
+			ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer cancel()
+			v, err := r.runVersionCommand(ctx, op)
+			if err != nil || v == "" {
+				return
+			}
+			r.versionCache.Set(name, v)
+			if err := config.UpdateOperationVersion(r.configPath, name, v); err != nil {
+				log.Printf("version write-back failed for %q: %v", name, err)
+			}
+			r.mu.Lock()
+			updated := r.ops[name]
+			updated.CurrentVersion = v
+			r.ops[name] = updated
+			r.mu.Unlock()
+		}(name, op)
 	}
+	wg.Wait()
 }
 
 // runVersionCommand executes op.VersionCommand via bash and returns trimmed stdout.
@@ -122,22 +130,28 @@ func (r *Runner) Run(ctx context.Context, name string, output func(string)) (*Ru
 	r.active[name] = true
 	r.mu.Unlock()
 
-	defer func() {
-		r.mu.Lock()
-		delete(r.active, name)
-		r.mu.Unlock()
-	}()
-
 	startedAt := time.Now()
 	runID, _ := r.history.InsertRun(name, startedAt)
 
-	// Build command with a timeout context
+	// Build command with a timeout context and store the cancel so callers
+	// can cancel via Cancel(name).
 	timeout := time.Duration(op.Timeout) * time.Second
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
 	ctx, cancel := context.WithTimeout(ctx, timeout)
-	defer cancel()
+
+	r.mu.Lock()
+	r.cancels[name] = cancel
+	r.mu.Unlock()
+
+	defer func() {
+		cancel()
+		r.mu.Lock()
+		delete(r.active, name)
+		delete(r.cancels, name)
+		r.mu.Unlock()
+	}()
 
 	workDir := op.WorkingDir
 	if workDir == "" {
@@ -262,6 +276,33 @@ func (r *Runner) LastRun(name string) *HistoryRecord {
 // History returns the run history for the named operation.
 func (r *Runner) History(name string, limit int) ([]HistoryRecord, error) {
 	return r.history.ListHistory(name, limit)
+}
+
+// GlobalHistory returns recent run history across all operations.
+func (r *Runner) GlobalHistory(limit int) ([]HistoryRecord, error) {
+	return r.history.ListAllHistory(limit)
+}
+
+// Cancel signals a running operation to stop by cancelling its context.
+// Returns an error if the operation is not currently running.
+func (r *Runner) Cancel(name string) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cancel, ok := r.cancels[name]
+	if !ok {
+		return fmt.Errorf("operation %q is not running", name)
+	}
+	cancel()
+	return nil
+}
+
+// Reload atomically replaces the operation map with a freshly loaded config.
+// Active runs are unaffected; version cache is re-warmed for new operations.
+func (r *Runner) Reload(ops map[string]config.Operation) {
+	r.mu.Lock()
+	r.ops = ops
+	r.mu.Unlock()
+	go r.warmVersionCache()
 }
 
 func truncate(s string, maxBytes int) string {

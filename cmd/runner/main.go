@@ -58,7 +58,7 @@ func main() {
 	runner := operations.NewRunner(cfg.Operations, histDB, *configPath)
 
 	// HTTP server
-	srv := api.New(cfg, dc, runner)
+	srv := api.New(cfg, dc, runner, *configPath)
 
 	// Run server in background; block on OS signal
 	serverErr := make(chan error, 1)
