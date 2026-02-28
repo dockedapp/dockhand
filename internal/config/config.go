@@ -25,6 +25,25 @@ type Config struct {
 	Runner     RunnerConfig         `yaml:"runner"`
 	Docker     DockerConfig         `yaml:"docker"`
 	Operations map[string]Operation `yaml:"operations"`
+	Apps       map[string]App       `yaml:"apps"`
+}
+
+// AppOperation is a single runnable operation inside an App.
+type AppOperation struct {
+	Label      string `yaml:"label"`
+	Command    string `yaml:"command"`
+	Timeout    int    `yaml:"timeout"`
+	WorkingDir string `yaml:"working_dir"`
+}
+
+// App is a named managed service with one or more runnable operations.
+type App struct {
+	Description       string                  `yaml:"description"`
+	CurrentVersion    string                  `yaml:"current_version,omitempty"`
+	VersionCommand    string                  `yaml:"version_command,omitempty"`
+	VersionSource     *VersionSource          `yaml:"version_source,omitempty"`
+	SystemUpdateCheck string                  `yaml:"system_update_check,omitempty"`
+	Operations        map[string]AppOperation `yaml:"operations"`
 }
 
 type ServerConfig struct {
@@ -99,6 +118,7 @@ func defaults() *Config {
 			ComposeBinary: defaultComposeBinary,
 		},
 		Operations: map[string]Operation{},
+		Apps:       map[string]App{},
 	}
 }
 
@@ -127,6 +147,47 @@ func applyDefaults(cfg *Config) {
 			op.WorkingDir = "/"
 		}
 		cfg.Operations[name] = op
+	}
+	for appName, app := range cfg.Apps {
+		for opName, op := range app.Operations {
+			if op.Timeout == 0 {
+				op.Timeout = defaultOpTimeout
+			}
+			if op.WorkingDir == "" {
+				op.WorkingDir = "/"
+			}
+			if op.Label == "" {
+				op.Label = opName
+			}
+			app.Operations[opName] = op
+		}
+		cfg.Apps[appName] = app
+	}
+	migrateOperationsToApps(cfg)
+}
+
+// migrateOperationsToApps promotes legacy operations to single-op apps for
+// backward compatibility. Only runs when apps is empty and operations is non-empty.
+func migrateOperationsToApps(cfg *Config) {
+	if len(cfg.Apps) > 0 || len(cfg.Operations) == 0 {
+		return
+	}
+	cfg.Apps = make(map[string]App, len(cfg.Operations))
+	for name, op := range cfg.Operations {
+		cfg.Apps[name] = App{
+			Description:    op.Description,
+			CurrentVersion: op.CurrentVersion,
+			VersionCommand: op.VersionCommand,
+			VersionSource:  op.VersionSource,
+			Operations: map[string]AppOperation{
+				"run": {
+					Label:      "Run",
+					Command:    op.Command,
+					Timeout:    op.Timeout,
+					WorkingDir: op.WorkingDir,
+				},
+			},
+		}
 	}
 }
 

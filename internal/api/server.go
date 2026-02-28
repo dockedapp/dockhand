@@ -62,6 +62,13 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, confi
 	mux.Handle("DELETE /operations/{name}/run", auth(http.HandlerFunc(oh.Cancel)))
 	mux.Handle("GET /operations/{name}/history", auth(http.HandlerFunc(oh.History)))
 
+	// App routes — the new first-class concept above operations.
+	ah := handlers.NewAppHandlers(runner)
+	mux.Handle("GET /apps", auth(http.HandlerFunc(ah.List)))
+	mux.Handle("POST /apps/{appName}/operations/{opName}/run", auth(http.HandlerFunc(ah.RunApp)))
+	mux.Handle("DELETE /apps/{appName}/operations/{opName}/run", auth(http.HandlerFunc(ah.CancelApp)))
+	mux.Handle("GET /apps/{appName}/operations/{opName}/history", auth(http.HandlerFunc(ah.AppHistory)))
+
 	httpServer := &http.Server{
 		Addr:         fmt.Sprintf(":%d", cfg.Server.Port),
 		Handler:      loggingMiddleware(mux),

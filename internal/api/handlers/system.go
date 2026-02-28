@@ -145,7 +145,7 @@ func Uninstall(w http.ResponseWriter, r *http.Request) {
 }
 
 // Reload handles POST /reload
-// Re-reads the config file and hot-reloads the operation set without restarting.
+// Re-reads the config file and hot-reloads the operation and app sets without restarting.
 func Reload(configPath string, runner *operations.Runner) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		cfg, err := config.Load(configPath)
@@ -154,10 +154,12 @@ func Reload(configPath string, runner *operations.Runner) http.HandlerFunc {
 			return
 		}
 		runner.Reload(cfg.Operations)
-		log.Printf("config reloaded from %s (%d operations)", configPath, len(cfg.Operations))
+		runner.ReloadApps(cfg.Apps)
+		log.Printf("config reloaded from %s (%d operations, %d apps)", configPath, len(cfg.Operations), len(cfg.Apps))
 		writeJSON(w, map[string]any{
 			"reloaded":   true,
 			"operations": len(cfg.Operations),
+			"apps":       len(cfg.Apps),
 		})
 	}
 }
