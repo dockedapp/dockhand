@@ -93,7 +93,9 @@ func (r *Runner) warmVersionCache() {
 	wg.Wait()
 }
 
-// runVersionCommand executes op.VersionCommand via bash and returns trimmed stdout.
+// runVersionCommand executes op.VersionCommand via bash and returns the last
+// non-empty line of stdout. Using the last line discards any banner/MOTD text
+// that login profile scripts may print before the actual command runs.
 func (r *Runner) runVersionCommand(ctx context.Context, op config.Operation) (string, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", op.VersionCommand)
 	if op.WorkingDir != "" {
@@ -104,7 +106,19 @@ func (r *Runner) runVersionCommand(ctx context.Context, op config.Operation) (st
 	if err != nil {
 		return "", err
 	}
-	return strings.TrimSpace(string(out)), nil
+	return lastNonEmptyLine(strings.TrimSpace(string(out))), nil
+}
+
+// lastNonEmptyLine returns the last non-whitespace line of s.
+// Used to strip login-shell banner/MOTD output that precedes version output.
+func lastNonEmptyLine(s string) string {
+	lines := strings.Split(s, "\n")
+	for i := len(lines) - 1; i >= 0; i-- {
+		if line := strings.TrimSpace(lines[i]); line != "" {
+			return line
+		}
+	}
+	return s
 }
 
 // RunResult is returned after an operation completes.
