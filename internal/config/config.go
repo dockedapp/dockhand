@@ -45,11 +45,19 @@ type DockerConfig struct {
 	ComposeBinary string `yaml:"compose_binary"`
 }
 
+type VersionSource struct {
+	Type string `yaml:"type"` // "github"
+	Repo string `yaml:"repo"` // "owner/repo"
+}
+
 type Operation struct {
-	Command     string `yaml:"command"`
-	Description string `yaml:"description"`
-	Timeout     int    `yaml:"timeout"`
-	WorkingDir  string `yaml:"working_dir"`
+	Command        string         `yaml:"command"`
+	Description    string         `yaml:"description"`
+	Timeout        int            `yaml:"timeout"`
+	WorkingDir     string         `yaml:"working_dir"`
+	CurrentVersion string         `yaml:"current_version,omitempty"`
+	VersionCommand string         `yaml:"version_command,omitempty"`
+	VersionSource  *VersionSource `yaml:"version_source,omitempty"`
 }
 
 // Load reads the config file at path, applies env var overrides, resolves

@@ -6,6 +6,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"os/exec"
 	"os/user"
@@ -18,19 +19,84 @@ import (
 
 // Runner executes named operations defined in the config and persists history.
 type Runner struct {
-	ops     map[string]config.Operation
-	history *DB
-	mu      sync.Mutex // guards activeRuns
-	active  map[string]bool
+	ops          map[string]config.Operation
+	history      *DB
+	mu           sync.Mutex // guards activeRuns and ops
+	active       map[string]bool
+	versionCache *VersionCache
+	configPath   string
 }
 
 // NewRunner creates a Runner with the given operations and history database.
-func NewRunner(ops map[string]config.Operation, history *DB) *Runner {
-	return &Runner{
-		ops:     ops,
-		history: history,
-		active:  make(map[string]bool),
+// configPath is the path to the dockhand YAML config (for version write-back).
+func NewRunner(ops map[string]config.Operation, history *DB, configPath string) *Runner {
+	r := &Runner{
+		ops:          ops,
+		history:      history,
+		active:       make(map[string]bool),
+		versionCache: NewVersionCache(),
+		configPath:   configPath,
 	}
+	go r.warmVersionCache()
+	return r
+}
+
+// CurrentVersion returns the current version for the named operation.
+// It checks the in-memory cache first (5-min TTL), then falls back to
+// the static value in the config.
+func (r *Runner) CurrentVersion(name string) string {
+	if v, ok := r.versionCache.Get(name); ok {
+		return v
+	}
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.ops[name].CurrentVersion
+}
+
+// warmVersionCache runs version_command for each operation on startup,
+// caches the result, and writes it back to the YAML config.
+func (r *Runner) warmVersionCache() {
+	r.mu.Lock()
+	ops := make(map[string]config.Operation, len(r.ops))
+	for k, v := range r.ops {
+		ops[k] = v
+	}
+	r.mu.Unlock()
+
+	for name, op := range ops {
+		if op.VersionCommand == "" {
+			continue
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+		v, err := r.runVersionCommand(ctx, op)
+		cancel()
+		if err != nil || v == "" {
+			continue
+		}
+		r.versionCache.Set(name, v)
+		if err := config.UpdateOperationVersion(r.configPath, name, v); err != nil {
+			log.Printf("version write-back failed for %q: %v", name, err)
+		}
+		r.mu.Lock()
+		updated := r.ops[name]
+		updated.CurrentVersion = v
+		r.ops[name] = updated
+		r.mu.Unlock()
+	}
+}
+
+// runVersionCommand executes op.VersionCommand via bash and returns trimmed stdout.
+func (r *Runner) runVersionCommand(ctx context.Context, op config.Operation) (string, error) {
+	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", op.VersionCommand)
+	if op.WorkingDir != "" {
+		cmd.Dir = op.WorkingDir
+	}
+	cmd.Env = os.Environ()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return strings.TrimSpace(string(out)), nil
 }
 
 // RunResult is returned after an operation completes.
@@ -148,6 +214,26 @@ func (r *Runner) Run(ctx context.Context, name string, output func(string)) (*Ru
 	if runID > 0 {
 		_ = r.history.UpdateRun(runID, finishedAt, exitCode, captured)
 		_ = r.history.Prune(name)
+	}
+
+	// Post-run version detection (Tier 3): re-run version_command after a
+	// successful run and write the result back to the YAML config.
+	if exitCode == 0 && op.VersionCommand != "" {
+		go func() {
+			vCtx, vCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			defer vCancel()
+			if v, err := r.runVersionCommand(vCtx, op); err == nil && v != "" {
+				r.versionCache.Set(name, v)
+				if err := config.UpdateOperationVersion(r.configPath, name, v); err != nil {
+					log.Printf("post-run version write-back failed for %q: %v", name, err)
+				}
+				r.mu.Lock()
+				updated := r.ops[name]
+				updated.CurrentVersion = v
+				r.ops[name] = updated
+				r.mu.Unlock()
+			}
+		}()
 	}
 
 	return &RunResult{

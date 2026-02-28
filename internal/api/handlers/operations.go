@@ -19,24 +19,40 @@ func NewOperationHandlers(ops map[string]config.Operation, runner *operations.Ru
 	return &opHandlers{ops: ops, runner: runner}
 }
 
+// VersionSourceInfo is the JSON representation of a version source.
+type VersionSourceInfo struct {
+	Type string `json:"type"`
+	Repo string `json:"repo"`
+}
+
 // OperationSummary is the list-view representation of an operation.
 type OperationSummary struct {
-	Name        string                    `json:"name"`
-	Description string                    `json:"description"`
-	Active      bool                      `json:"active"`
-	LastRun     *operations.HistoryRecord `json:"lastRun,omitempty"`
+	Name           string                    `json:"name"`
+	Description    string                    `json:"description"`
+	Active         bool                      `json:"active"`
+	LastRun        *operations.HistoryRecord `json:"lastRun,omitempty"`
+	CurrentVersion string                    `json:"currentVersion,omitempty"`
+	VersionSource  *VersionSourceInfo        `json:"versionSource,omitempty"`
 }
 
 // List handles GET /operations
 func (h *opHandlers) List(w http.ResponseWriter, r *http.Request) {
 	out := make([]OperationSummary, 0, len(h.ops))
 	for name, op := range h.ops {
-		out = append(out, OperationSummary{
-			Name:        name,
-			Description: op.Description,
-			Active:      h.runner.IsActive(name),
-			LastRun:     h.runner.LastRun(name),
-		})
+		summary := OperationSummary{
+			Name:           name,
+			Description:    op.Description,
+			Active:         h.runner.IsActive(name),
+			LastRun:        h.runner.LastRun(name),
+			CurrentVersion: h.runner.CurrentVersion(name),
+		}
+		if op.VersionSource != nil {
+			summary.VersionSource = &VersionSourceInfo{
+				Type: op.VersionSource.Type,
+				Repo: op.VersionSource.Repo,
+			}
+		}
+		out = append(out, summary)
 	}
 	writeJSON(w, map[string]any{"operations": out})
 }
