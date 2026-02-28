@@ -21,7 +21,7 @@ type Server struct {
 }
 
 // New constructs the HTTP server, wires all routes, and returns it ready to start.
-func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner) *Server {
+func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, configPath string) *Server {
 	mux := http.NewServeMux()
 
 	auth := middleware.Auth(cfg.Server.APIKey)
@@ -46,15 +46,20 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner) *Serv
 		mux.Handle("GET /containers/{id}/logs", auth(http.HandlerFunc(ch.Logs)))
 	}
 
-	// System routes — update and uninstall (always registered, authenticated)
+	// System routes — update, uninstall, reload (always registered, authenticated)
 	mux.Handle("POST /update", auth(http.HandlerFunc(handlers.Update)))
 	mux.Handle("POST /uninstall", auth(http.HandlerFunc(handlers.Uninstall)))
+	mux.Handle("POST /reload", auth(handlers.Reload(configPath, runner)))
 
 	// Operation routes (only registered if operations are defined)
+	// NOTE: static paths (/operations/history) must be registered before
+	// parameterised paths (/operations/{name}/...) to avoid ambiguity.
 	if len(cfg.Operations) > 0 {
 		oh := handlers.NewOperationHandlers(cfg.Operations, runner)
 		mux.Handle("GET /operations", auth(http.HandlerFunc(oh.List)))
+		mux.Handle("GET /operations/history", auth(http.HandlerFunc(oh.AllHistory)))
 		mux.Handle("POST /operations/{name}/run", auth(http.HandlerFunc(oh.Run)))
+		mux.Handle("DELETE /operations/{name}/run", auth(http.HandlerFunc(oh.Cancel)))
 		mux.Handle("GET /operations/{name}/history", auth(http.HandlerFunc(oh.History)))
 	}
 

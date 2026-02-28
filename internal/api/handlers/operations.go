@@ -80,6 +80,41 @@ func (h *opHandlers) Run(w http.ResponseWriter, r *http.Request) {
 	stream.Done(result.ExitCode)
 }
 
+// Cancel handles DELETE /operations/{name}/run
+// Cancels a currently running operation by cancelling its context.
+func (h *opHandlers) Cancel(w http.ResponseWriter, r *http.Request) {
+	name := r.PathValue("name")
+	if _, ok := h.ops[name]; !ok {
+		httpError(w, "unknown operation: "+name, http.StatusNotFound)
+		return
+	}
+	if err := h.runner.Cancel(name); err != nil {
+		httpError(w, err.Error(), http.StatusConflict)
+		return
+	}
+	writeJSON(w, map[string]any{"cancelled": true, "operation": name})
+}
+
+// AllHistory handles GET /operations/history
+// Returns recent run history across all operations.
+func (h *opHandlers) AllHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 50
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	records, err := h.runner.GlobalHistory(limit)
+	if err != nil {
+		httpError(w, "history error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if records == nil {
+		records = []operations.HistoryRecord{}
+	}
+	writeJSON(w, map[string]any{"history": records})
+}
+
 // History handles GET /operations/{name}/history
 func (h *opHandlers) History(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")

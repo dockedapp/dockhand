@@ -1,6 +1,8 @@
 package handlers
 
 import (
+	"bufio"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -10,7 +12,11 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"syscall"
 	"time"
+
+	"github.com/dockedapp/dockhand/internal/config"
+	"github.com/dockedapp/dockhand/internal/operations"
 )
 
 type updateRequest struct {
@@ -61,6 +67,17 @@ func Update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	checksumsURL := fmt.Sprintf(
+		"https://github.com/dockedapp/dockhand/releases/download/v%s/SHA256SUMS",
+		version,
+	)
+	binaryName := fmt.Sprintf("dockhand-linux-%s", arch)
+	if err := verifyChecksum(tmpPath, binaryName, checksumsURL); err != nil {
+		_ = os.Remove(tmpPath)
+		httpError(w, "checksum verification failed: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+
 	if err := os.Chmod(tmpPath, 0755); err != nil {
 		_ = os.Remove(tmpPath)
 		httpError(w, "chmod failed: "+err.Error(), http.StatusInternalServerError)
@@ -89,8 +106,9 @@ func Update(w http.ResponseWriter, r *http.Request) {
 }
 
 // Uninstall handles POST /uninstall
-// Responds immediately, then asynchronously stops the service and removes all
-// dockhand files from the host.
+// Responds immediately, then asynchronously removes all dockhand files and
+// signals itself to exit cleanly. Files are deleted BEFORE the process stops
+// so the goroutine is never killed mid-way by systemd cgroup cleanup.
 func Uninstall(w http.ResponseWriter, r *http.Request) {
 	writeJSON(w, map[string]any{
 		"success": true,
@@ -100,22 +118,91 @@ func Uninstall(w http.ResponseWriter, r *http.Request) {
 	go func() {
 		time.Sleep(500 * time.Millisecond)
 		log.Printf("beginning uninstall")
-		script := strings.Join([]string{
-			"systemctl stop dockhand",
-			"systemctl disable dockhand",
-			"rm -f /usr/local/bin/dockhand",
-			"rm -rf /etc/docked-runner",
-			"rm -rf /var/lib/docked-runner",
-			"rm -f /etc/systemd/system/dockhand.service",
-			"systemctl daemon-reload",
-		}, " && ")
-		out, err := exec.Command("bash", "-c", script).CombinedOutput()
-		if err != nil {
-			log.Printf("uninstall error: %v — %s", err, out)
-		} else {
-			log.Printf("uninstall complete")
+
+		// Disable service and remove all files first, while the process is still
+		// running. Do NOT call "systemctl stop" here — that sends SIGTERM to us,
+		// which kills this goroutine before cleanup finishes.
+		cmds := [][]string{
+			{"systemctl", "disable", "dockhand"},
+			{"rm", "-f", "/usr/local/bin/dockhand"},
+			{"rm", "-rf", "/etc/docked-runner"},
+			{"rm", "-rf", "/var/lib/docked-runner"},
+			{"rm", "-f", "/etc/systemd/system/dockhand.service"},
+			{"systemctl", "daemon-reload"},
 		}
+		for _, args := range cmds {
+			if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+				log.Printf("uninstall: %s: %v: %s", args[0], err, out)
+			}
+		}
+
+		log.Printf("uninstall complete — signaling shutdown")
+		// SIGTERM ourselves. main.go catches it and exits with code 0.
+		// Since Restart=on-failure, a clean exit won't trigger a restart,
+		// and the unit file is already gone so systemd won't restart on boot.
+		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
 	}()
+}
+
+// Reload handles POST /reload
+// Re-reads the config file and hot-reloads the operation set without restarting.
+func Reload(configPath string, runner *operations.Runner) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		cfg, err := config.Load(configPath)
+		if err != nil {
+			httpError(w, "config reload failed: "+err.Error(), http.StatusInternalServerError)
+			return
+		}
+		runner.Reload(cfg.Operations)
+		log.Printf("config reloaded from %s (%d operations)", configPath, len(cfg.Operations))
+		writeJSON(w, map[string]any{
+			"reloaded":   true,
+			"operations": len(cfg.Operations),
+		})
+	}
+}
+
+// verifyChecksum downloads the SHA256SUMS file for the release and checks
+// that the file at filePath matches the expected hash for binaryName.
+func verifyChecksum(filePath, binaryName, checksumsURL string) error {
+	resp, err := http.Get(checksumsURL) //nolint:gosec
+	if err != nil {
+		return fmt.Errorf("fetch checksums: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return fmt.Errorf("checksums HTTP %d", resp.StatusCode)
+	}
+
+	// Parse "<hash>  <filename>" lines (sha256sum / BSD format)
+	var expected string
+	scanner := bufio.NewScanner(resp.Body)
+	for scanner.Scan() {
+		parts := strings.Fields(scanner.Text())
+		if len(parts) == 2 && parts[1] == binaryName {
+			expected = parts[0]
+			break
+		}
+	}
+	if expected == "" {
+		return fmt.Errorf("no checksum found for %s in release", binaryName)
+	}
+
+	f, err := os.Open(filePath)
+	if err != nil {
+		return fmt.Errorf("open file for hashing: %w", err)
+	}
+	defer f.Close()
+
+	h := sha256.New()
+	if _, err := io.Copy(h, f); err != nil {
+		return fmt.Errorf("hashing file: %w", err)
+	}
+
+	if actual := fmt.Sprintf("%x", h.Sum(nil)); actual != expected {
+		return fmt.Errorf("checksum mismatch: got %s, want %s", actual, expected)
+	}
+	return nil
 }
 
 func downloadBinary(url, dest string) error {

@@ -263,6 +263,10 @@ func streamCommand(ctx context.Context, output func(string), name string, args .
 }
 
 func shortID(id string) string {
+	// Docker image IDs are "sha256:<hex>"; strip the algorithm prefix first.
+	if idx := strings.Index(id, ":"); idx >= 0 {
+		id = id[idx+1:]
+	}
 	if len(id) > 12 {
 		return id[:12]
 	}
