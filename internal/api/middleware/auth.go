@@ -12,7 +12,7 @@ func Auth(apiKey string) func(http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			token := extractBearer(r.Header.Get("Authorization"))
 			if token == "" || token != apiKey {
-				w.Header().Set("WWW-Authenticate", `Bearer realm="docked-runner"`)
+				w.Header().Set("WWW-Authenticate", `Bearer realm="dockhand"`)
 				http.Error(w, "unauthorized", http.StatusUnauthorized)
 				return
 			}

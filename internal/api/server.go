@@ -82,7 +82,7 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, confi
 
 // Start begins listening. Blocks until the server stops.
 func (s *Server) Start() error {
-	log.Printf("docked-runner listening on :%d  (runner: %s)", s.cfg.Server.Port, s.cfg.Runner.Name)
+	log.Printf("dockhand listening on :%d  (runner: %s)", s.cfg.Server.Port, s.cfg.Runner.Name)
 	return s.httpServer.ListenAndServe()
 }
 
