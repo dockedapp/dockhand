@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strconv"
+	"strings"
 
 	"gopkg.in/yaml.v3"
 )
@@ -43,7 +44,22 @@ type App struct {
 	VersionCommand    string                  `yaml:"version_command,omitempty"`
 	VersionSource     *VersionSource          `yaml:"version_source,omitempty"`
 	SystemUpdateCheck string                  `yaml:"system_update_check,omitempty"`
+	PackageManager    string                  `yaml:"package_manager,omitempty"`
 	Operations        map[string]AppOperation `yaml:"operations"`
+}
+
+// packageManagerCommands maps package manager names to shell commands that
+// print the number of upgradable packages to stdout (always exits 0).
+var packageManagerCommands = map[string]string{
+	"apt":     `apt list --upgradable 2>/dev/null | grep -c '\[upgradable\]' || true`,
+	"apt-get": `apt list --upgradable 2>/dev/null | grep -c '\[upgradable\]' || true`,
+	"yum":     `yum check-update -q 2>/dev/null | grep -c '^[A-Za-z0-9]' || true`,
+	"dnf":     `dnf check-update -q 2>/dev/null | grep -c '^[A-Za-z0-9]' || true`,
+	"apk":     `apk list --upgradable 2>/dev/null | grep -c '.' || true`,
+	"zypper":  `zypper list-updates 2>/dev/null | grep -c '^v' || true`,
+	"pacman":  `checkupdates 2>/dev/null | wc -l | tr -d ' '`,
+	"pkg":     `pkg upgrade -n 2>/dev/null | grep -c '^\[' || true`,
+	"brew":    `brew outdated --quiet 2>/dev/null | wc -l | tr -d ' '`,
 }
 
 type ServerConfig struct {
@@ -160,6 +176,11 @@ func applyDefaults(cfg *Config) {
 				op.Label = opName
 			}
 			app.Operations[opName] = op
+		}
+		if app.PackageManager != "" && app.SystemUpdateCheck == "" {
+			if cmd, ok := packageManagerCommands[strings.ToLower(app.PackageManager)]; ok {
+				app.SystemUpdateCheck = cmd
+			}
 		}
 		cfg.Apps[appName] = app
 	}

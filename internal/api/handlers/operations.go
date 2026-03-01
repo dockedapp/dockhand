@@ -168,6 +168,7 @@ type AppSummary struct {
 	CurrentVersion         string                `json:"currentVersion,omitempty"`
 	VersionSource          *VersionSourceInfo    `json:"versionSource,omitempty"`
 	SystemUpdatesAvailable bool                  `json:"systemUpdatesAvailable"`
+	SystemUpdateCount      int                   `json:"systemUpdateCount,omitempty"`
 	Operations             []AppOperationSummary `json:"operations"`
 }
 
@@ -181,6 +182,7 @@ func (h *appHandlers) List(w http.ResponseWriter, r *http.Request) {
 			Description:            app.Description,
 			CurrentVersion:         h.runner.CurrentAppVersion(name),
 			SystemUpdatesAvailable: h.runner.SystemUpdatesAvailable(name),
+			SystemUpdateCount:      h.runner.SystemUpdateCount(name),
 		}
 		if app.VersionSource != nil {
 			summary.VersionSource = &VersionSourceInfo{
