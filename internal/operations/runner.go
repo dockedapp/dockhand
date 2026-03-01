@@ -457,6 +457,11 @@ func (r *Runner) AppHistory(appName, opName string, limit int) ([]HistoryRecord,
 	return r.history.ListHistory(appName+":"+opName, limit)
 }
 
+// AllAppHistory returns recent history across all app operations, newest first.
+func (r *Runner) AllAppHistory(limit int) ([]HistoryRecord, error) {
+	return r.history.ListAllAppHistory(limit)
+}
+
 // RunApp executes a named operation on a named app, streaming each output line to output.
 func (r *Runner) RunApp(ctx context.Context, appName, opName string, output func(string)) (*RunResult, error) {
 	r.mu.Lock()

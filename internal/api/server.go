@@ -63,8 +63,10 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, confi
 	mux.Handle("GET /operations/{name}/history", auth(http.HandlerFunc(oh.History)))
 
 	// App routes — the new first-class concept above operations.
+	// NOTE: static paths (/apps/history) must come before parameterised paths.
 	ah := handlers.NewAppHandlers(runner)
 	mux.Handle("GET /apps", auth(http.HandlerFunc(ah.List)))
+	mux.Handle("GET /apps/history", auth(http.HandlerFunc(ah.AllAppHistory)))
 	mux.Handle("POST /apps/{appName}/operations/{opName}/run", auth(http.HandlerFunc(ah.RunApp)))
 	mux.Handle("DELETE /apps/{appName}/operations/{opName}/run", auth(http.HandlerFunc(ah.CancelApp)))
 	mux.Handle("GET /apps/{appName}/operations/{opName}/history", auth(http.HandlerFunc(ah.AppHistory)))
