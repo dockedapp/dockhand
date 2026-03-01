@@ -3,9 +3,37 @@ package config
 import (
 	"fmt"
 	"os"
+	"sync"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
+
+// writeMu serializes all config file writes to avoid concurrent temp file races.
+var writeMu sync.Mutex
+
+// lastWriteTime records the mtime of the config file after our most recent
+// write, so the watcher can skip self-inflicted changes.
+var (
+	lwMu          sync.Mutex
+	lastWriteTime time.Time
+)
+
+// IsOwnWrite reports whether the given mtime matches the last write we performed.
+// Used by the config watcher to break the write-back → reload → write-back loop.
+func IsOwnWrite(t time.Time) bool {
+	lwMu.Lock()
+	defer lwMu.Unlock()
+	return !lastWriteTime.IsZero() && t.Equal(lastWriteTime)
+}
+
+func recordWriteTime(path string) {
+	if info, err := os.Stat(path); err == nil {
+		lwMu.Lock()
+		lastWriteTime = info.ModTime()
+		lwMu.Unlock()
+	}
+}
 
 // UpdateOperationVersion updates the current_version field of a named operation
 // in the YAML config file at path. It uses the yaml.Node API to preserve
@@ -14,6 +42,9 @@ func UpdateOperationVersion(path, opName, newVersion string) error {
 	if path == "" {
 		return nil
 	}
+
+	writeMu.Lock()
+	defer writeMu.Unlock()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -46,7 +77,9 @@ func UpdateOperationVersion(path, opName, newVersion string) error {
 	// Find or create "current_version" key inside opNode
 	cvNode := mappingGet(opNode, "current_version")
 	if cvNode != nil {
-		// Update in place
+		if cvNode.Value == newVersion {
+			return nil // no change needed
+		}
 		cvNode.Value = newVersion
 	} else {
 		// Append key + value nodes
@@ -60,7 +93,7 @@ func UpdateOperationVersion(path, opName, newVersion string) error {
 		return fmt.Errorf("marshaling updated config: %w", err)
 	}
 
-	// Atomic write
+	// Atomic write using a unique temp file
 	tmp := path + ".tmp"
 	if err := os.WriteFile(tmp, out, 0600); err != nil {
 		return fmt.Errorf("writing temp config: %w", err)
@@ -70,6 +103,7 @@ func UpdateOperationVersion(path, opName, newVersion string) error {
 		return fmt.Errorf("renaming temp config: %w", err)
 	}
 
+	recordWriteTime(path)
 	return nil
 }
 
@@ -79,6 +113,9 @@ func UpdateAppVersion(path, appName, newVersion string) error {
 	if path == "" {
 		return nil
 	}
+
+	writeMu.Lock()
+	defer writeMu.Unlock()
 
 	data, err := os.ReadFile(path)
 	if err != nil {
@@ -107,6 +144,9 @@ func UpdateAppVersion(path, appName, newVersion string) error {
 
 	cvNode := mappingGet(appNode, "current_version")
 	if cvNode != nil {
+		if cvNode.Value == newVersion {
+			return nil // no change needed
+		}
 		cvNode.Value = newVersion
 	} else {
 		keyNode := &yaml.Node{Kind: yaml.ScalarNode, Tag: "!!str", Value: "current_version"}
@@ -128,6 +168,7 @@ func UpdateAppVersion(path, appName, newVersion string) error {
 		return fmt.Errorf("renaming temp config: %w", err)
 	}
 
+	recordWriteTime(path)
 	return nil
 }
 
