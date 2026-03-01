@@ -134,16 +134,12 @@ func (r *Runner) warmVersionCache() {
 				defer wg.Done()
 				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer cancel()
-				available, err := r.runSystemUpdateCheck(ctx, app)
+				count, err := r.runSystemUpdateCheck(ctx, app)
 				if err != nil {
 					log.Printf("system_update_check failed for %q: %v", appName, err)
 					return
 				}
-				v := "0"
-				if available {
-					v = "1"
-				}
-				r.versionCache.Set("__sysupdate:"+appName, v)
+				r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(count))
 			}(appName, app)
 		}
 	}
@@ -174,16 +170,16 @@ func (r *Runner) runVersionCommandStr(ctx context.Context, versionCommand string
 type AppOpConfig = config.AppOperation
 
 // runSystemUpdateCheck executes the system_update_check command and returns
-// true if the trimmed stdout parses to an integer > 0.
-func (r *Runner) runSystemUpdateCheck(ctx context.Context, app config.App) (bool, error) {
+// the number of upgradable packages (0 if none or on error).
+func (r *Runner) runSystemUpdateCheck(ctx context.Context, app config.App) (int, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", app.SystemUpdateCheck)
 	cmd.Env = os.Environ()
 	out, err := cmd.Output()
 	if err != nil {
-		return false, err
+		return 0, err
 	}
 	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
-	return n > 0, nil
+	return n, nil
 }
 
 // runVersionCommand executes op.VersionCommand via bash and returns the last
@@ -430,10 +426,20 @@ func (r *Runner) CurrentAppVersion(appName string) string {
 	return r.apps[appName].CurrentVersion
 }
 
+// SystemUpdateCount returns the number of upgradable packages for the named app,
+// or 0 if not tracked or not yet checked.
+func (r *Runner) SystemUpdateCount(appName string) int {
+	v, ok := r.versionCache.Get("__sysupdate:" + appName)
+	if !ok {
+		return 0
+	}
+	n, _ := strconv.Atoi(v)
+	return n
+}
+
 // SystemUpdatesAvailable returns whether system updates are available for the named app.
 func (r *Runner) SystemUpdatesAvailable(appName string) bool {
-	v, ok := r.versionCache.Get("__sysupdate:" + appName)
-	return ok && v == "1"
+	return r.SystemUpdateCount(appName) > 0
 }
 
 // IsAppActive reports whether the named app operation is currently running.
@@ -607,13 +613,9 @@ func (r *Runner) RunApp(ctx context.Context, appName, opName string, output func
 			if currentApp.SystemUpdateCheck != "" {
 				sCtx, sCancel := context.WithTimeout(context.Background(), 30*time.Second)
 				defer sCancel()
-				available, err := r.runSystemUpdateCheck(sCtx, currentApp)
+				count, err := r.runSystemUpdateCheck(sCtx, currentApp)
 				if err == nil {
-					v := "0"
-					if available {
-						v = "1"
-					}
-					r.versionCache.Set("__sysupdate:"+appName, v)
+					r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(count))
 				}
 			}
 		}()
