@@ -51,8 +51,8 @@ type App struct {
 // packageManagerCommands maps package manager names to shell commands that
 // print the number of upgradable packages to stdout (always exits 0).
 var packageManagerCommands = map[string]string{
-	"apt":     `apt list --upgradable 2>/dev/null | grep -c '\[upgradable\]' || true`,
-	"apt-get": `apt list --upgradable 2>/dev/null | grep -c '\[upgradable\]' || true`,
+	"apt":     `apt list --upgradable 2>/dev/null | grep -cF '[upgradable]' || true`,
+	"apt-get": `apt list --upgradable 2>/dev/null | grep -cF '[upgradable]' || true`,
 	"yum":     `yum check-update -q 2>/dev/null | grep -c '^[A-Za-z0-9]' || true`,
 	"dnf":     `dnf check-update -q 2>/dev/null | grep -c '^[A-Za-z0-9]' || true`,
 	"apk":     `apk list --upgradable 2>/dev/null | grep -c '.' || true`,
