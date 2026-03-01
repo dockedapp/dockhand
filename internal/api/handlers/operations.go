@@ -294,3 +294,23 @@ func (h *appHandlers) AppHistory(w http.ResponseWriter, r *http.Request) {
 	}
 	writeJSON(w, map[string]any{"history": records})
 }
+
+// AllAppHistory handles GET /apps/history
+// Returns recent run history across all app operations, newest first.
+func (h *appHandlers) AllAppHistory(w http.ResponseWriter, r *http.Request) {
+	limit := 100
+	if l := r.URL.Query().Get("limit"); l != "" {
+		if n, err := strconv.Atoi(l); err == nil && n > 0 {
+			limit = n
+		}
+	}
+	records, err := h.runner.AllAppHistory(limit)
+	if err != nil {
+		httpError(w, "history error: "+err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if records == nil {
+		records = []operations.HistoryRecord{}
+	}
+	writeJSON(w, map[string]any{"history": records})
+}
