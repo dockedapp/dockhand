@@ -26,10 +26,11 @@ type Runner struct {
 	mu           sync.Mutex // guards active, cancels, appsActive, appsCancels, ops, and apps
 	active       map[string]bool
 	cancels      map[string]context.CancelFunc
-	appsActive   map[string]bool             // key: "appName:opName"
+	appsActive   map[string]bool               // key: "appName:opName"
 	appsCancels  map[string]context.CancelFunc // key: "appName:opName"
 	versionCache *VersionCache
 	configPath   string
+	stopRefresh  chan struct{}
 }
 
 // NewRunner creates a Runner with the given operations, apps, and history database.
@@ -45,8 +46,10 @@ func NewRunner(ops map[string]config.Operation, apps map[string]config.App, hist
 		appsCancels:  make(map[string]context.CancelFunc),
 		versionCache: NewVersionCache(),
 		configPath:   configPath,
+		stopRefresh:  make(chan struct{}),
 	}
 	go r.warmVersionCache()
+	go r.backgroundRefresh()
 	return r
 }
 
@@ -145,6 +148,22 @@ func (r *Runner) warmVersionCache() {
 	}
 
 	wg.Wait()
+}
+
+// backgroundRefresh periodically re-runs warmVersionCache to keep the
+// version cache populated. This ensures system_update_check results and
+// version_command results remain available between config reloads.
+func (r *Runner) backgroundRefresh() {
+	ticker := time.NewTicker(4 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			r.warmVersionCache()
+		case <-r.stopRefresh:
+			return
+		}
+	}
 }
 
 // runVersionCommandStr runs a version command string via bash and returns the last non-empty line.
