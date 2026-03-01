@@ -27,6 +27,9 @@ func main() {
 		log.Fatalf("config error: %v", err)
 	}
 
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
 	// Attempt enrollment with Docked server (no-ops if already registered
 	// or no enrollment token is configured).
 	enrollment.Run(cfg, *configPath)
@@ -57,6 +60,18 @@ func main() {
 
 	runner := operations.NewRunner(cfg.Operations, cfg.Apps, histDB, *configPath)
 
+	// Watch config file — reload operations/apps automatically on save
+	go config.Watch(ctx, *configPath, 2*time.Second, func() {
+		c, err := config.Load(*configPath)
+		if err != nil {
+			log.Printf("config watcher: reload failed: %v", err)
+			return
+		}
+		runner.Reload(c.Operations)
+		runner.ReloadApps(c.Apps)
+		log.Printf("config watcher: reloaded (%d operations, %d apps)", len(c.Operations), len(c.Apps))
+	})
+
 	// HTTP server
 	srv := api.New(cfg, dc, runner, *configPath)
 
@@ -78,9 +93,9 @@ func main() {
 		log.Printf("received %s — shutting down", sig)
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := srv.Shutdown(ctx); err != nil {
+	shutCtx, shutCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutCancel()
+	if err := srv.Shutdown(shutCtx); err != nil {
 		log.Printf("shutdown error: %v", err)
 	}
 
