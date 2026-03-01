@@ -46,10 +46,11 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, confi
 		mux.Handle("GET /containers/{id}/logs", auth(http.HandlerFunc(ch.Logs)))
 	}
 
-	// System routes — update, uninstall, reload (always registered, authenticated)
+	// System routes — update, uninstall, reload, logs (always registered, authenticated)
 	mux.Handle("POST /update", auth(http.HandlerFunc(handlers.Update)))
 	mux.Handle("POST /uninstall", auth(http.HandlerFunc(handlers.Uninstall)))
 	mux.Handle("POST /reload", auth(handlers.Reload(configPath, runner)))
+	mux.Handle("GET /logs", auth(http.HandlerFunc(handlers.Logs)))
 
 	// Operation routes — always registered so they work even when config.yaml
 	// has no operations yet (e.g. fresh install) and after POST /reload adds some.

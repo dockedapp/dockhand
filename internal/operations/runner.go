@@ -142,6 +142,7 @@ func (r *Runner) warmVersionCache() {
 					log.Printf("system_update_check failed for %q: %v", appName, err)
 					return
 				}
+				log.Printf("system_update_check for %q: %d upgradable", appName, count)
 				r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(count))
 			}(appName, app)
 		}
@@ -193,11 +194,17 @@ type AppOpConfig = config.AppOperation
 func (r *Runner) runSystemUpdateCheck(ctx context.Context, app config.App) (int, error) {
 	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", app.SystemUpdateCheck)
 	cmd.Env = os.Environ()
-	out, err := cmd.Output()
+	out, err := cmd.CombinedOutput()
 	if err != nil {
+		log.Printf("system_update_check command error: %v, output: %q", err, string(out))
 		return 0, err
 	}
-	n, _ := strconv.Atoi(strings.TrimSpace(string(out)))
+	raw := strings.TrimSpace(string(out))
+	n, parseErr := strconv.Atoi(raw)
+	if parseErr != nil {
+		log.Printf("system_update_check parse error: raw output %q, err: %v", raw, parseErr)
+		return 0, nil
+	}
 	return n, nil
 }
 
