@@ -125,8 +125,8 @@ func Uninstall(w http.ResponseWriter, r *http.Request) {
 		cmds := [][]string{
 			{"systemctl", "disable", "dockhand"},
 			{"rm", "-f", "/usr/local/bin/dockhand"},
-			{"rm", "-rf", "/etc/docked-runner"},
-			{"rm", "-rf", "/var/lib/docked-runner"},
+			{"rm", "-rf", "/etc/dockhand"},
+			{"rm", "-rf", "/var/lib/dockhand"},
 			{"rm", "-f", "/etc/systemd/system/dockhand.service"},
 			{"systemctl", "daemon-reload"},
 		}

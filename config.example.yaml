@@ -4,8 +4,8 @@ server:
 
   # API key for authenticating requests from Docked.
   # Leave empty to auto-generate on first run (key is printed to stdout
-  # and persisted to /var/lib/docked-runner/.api_key).
-  # Override with env var: DOCKED_RUNNER_API_KEY
+  # and persisted to /var/lib/dockhand/.api_key).
+  # Override with env var: DOCKHAND_API_KEY
   api_key: ""
 
   # Enable TLS (self-signed cert auto-generated). Default: false
@@ -13,7 +13,7 @@ server:
 
 runner:
   # Display name shown in the Docked UI.
-  # Defaults to the system hostname. Override with: DOCKED_RUNNER_NAME
+  # Defaults to the system hostname. Override with: DOCKHAND_NAME
   name: "my-host"
 
   # Optional: URL of your Docked server. When set, the runner will

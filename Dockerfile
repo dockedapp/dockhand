@@ -28,9 +28,9 @@ RUN apk add --no-cache \
 COPY --from=builder /build/runner /usr/local/bin/runner
 
 # Config and data volumes
-VOLUME ["/etc/docked-runner", "/var/lib/docked-runner"]
+VOLUME ["/etc/dockhand", "/var/lib/dockhand"]
 
 EXPOSE 7777
 
 ENTRYPOINT ["runner"]
-CMD ["--config", "/etc/docked-runner/config.yaml"]
+CMD ["--config", "/etc/dockhand/config.yaml"]

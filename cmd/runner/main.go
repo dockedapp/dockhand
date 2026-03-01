@@ -19,7 +19,7 @@ import (
 )
 
 func main() {
-	configPath := flag.String("config", "/etc/docked-runner/config.yaml", "path to config file")
+	configPath := flag.String("config", "/etc/dockhand/config.yaml", "path to config file")
 	flag.Parse()
 
 	cfg, err := config.Load(*configPath)

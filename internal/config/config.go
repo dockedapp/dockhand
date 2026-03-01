@@ -16,8 +16,8 @@ const (
 	defaultSocket        = "/var/run/docker.sock"
 	defaultComposeBinary = "docker"
 	defaultOpTimeout     = 300
-	dataDir              = "/var/lib/docked-runner"
-	apiKeyFile           = "/var/lib/docked-runner/.api_key"
+	dataDir              = "/var/lib/dockhand"
+	apiKeyFile           = "/var/lib/dockhand/.api_key"
 )
 
 type Config struct {
@@ -136,7 +136,7 @@ func applyDefaults(cfg *Config) {
 		if hostname, err := os.Hostname(); err == nil {
 			cfg.Runner.Name = hostname
 		} else {
-			cfg.Runner.Name = "docked-runner"
+			cfg.Runner.Name = "dockhand"
 		}
 	}
 	for name, op := range cfg.Operations {
@@ -192,21 +192,21 @@ func migrateOperationsToApps(cfg *Config) {
 }
 
 func applyEnvOverrides(cfg *Config) {
-	if v := os.Getenv("DOCKED_RUNNER_API_KEY"); v != "" {
+	if v := os.Getenv("DOCKHAND_API_KEY"); v != "" {
 		cfg.Server.APIKey = v
 	}
-	if v := os.Getenv("DOCKED_RUNNER_PORT"); v != "" {
+	if v := os.Getenv("DOCKHAND_PORT"); v != "" {
 		if port, err := strconv.Atoi(v); err == nil {
 			cfg.Server.Port = port
 		}
 	}
-	if v := os.Getenv("DOCKED_RUNNER_NAME"); v != "" {
+	if v := os.Getenv("DOCKHAND_NAME"); v != "" {
 		cfg.Runner.Name = v
 	}
-	if v := os.Getenv("DOCKED_RUNNER_DOCKED_URL"); v != "" {
+	if v := os.Getenv("DOCKHAND_DOCKED_URL"); v != "" {
 		cfg.Runner.DockedURL = v
 	}
-	if v := os.Getenv("DOCKED_RUNNER_ENROLLMENT_TOKEN"); v != "" {
+	if v := os.Getenv("DOCKHAND_ENROLLMENT_TOKEN"); v != "" {
 		cfg.Runner.EnrollmentToken = v
 	}
 	if v := os.Getenv("DOCKER_HOST"); v != "" {
