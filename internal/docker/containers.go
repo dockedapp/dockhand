@@ -14,15 +14,15 @@ import (
 // ContainerInfo is the representation sent to Docked.
 // It intentionally omits large fields; Docked does registry checks server-side.
 type ContainerInfo struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	Image            string            `json:"image"`
-	ImageID          string            `json:"imageId"`
-	Status           string            `json:"status"`
-	State            string            `json:"state"`
-	Created          int64             `json:"created"`
-	Labels           map[string]string `json:"labels,omitempty"`
-	Ports            []PortBinding     `json:"ports,omitempty"`
+	ID      string            `json:"id"`
+	Name    string            `json:"name"`
+	Image   string            `json:"image"`
+	ImageID string            `json:"imageId"`
+	Status  string            `json:"status"`
+	State   string            `json:"state"`
+	Created int64             `json:"created"`
+	Labels  map[string]string `json:"labels,omitempty"`
+	Ports   []PortBinding     `json:"ports,omitempty"`
 
 	// NetworkMode from HostConfig (e.g. "container:<id>", "service:<name>", "bridge").
 	// Used by Docked to display network dependency warnings before upgrading.
@@ -36,6 +36,10 @@ type ContainerInfo struct {
 
 	// RepoDigests from the local image, used by Docked for update detection.
 	RepoDigests []string `json:"repoDigests,omitempty"`
+
+	// ImageCreated is the unix timestamp of when the image was built.
+	// Populated from the local image metadata.
+	ImageCreated int64 `json:"imageCreated,omitempty"`
 }
 
 // PortBinding represents a single host→container port mapping.
@@ -46,7 +50,14 @@ type PortBinding struct {
 	Protocol      string `json:"protocol"`
 }
 
-// ListContainers returns all running containers, enriched with RepoDigests from local images.
+// imageMetadata holds fields extracted from the local image list.
+type imageMetadata struct {
+	RepoDigests []string
+	Created     int64
+}
+
+// ListContainers returns all running containers, enriched with RepoDigests and
+// image creation time from local images.
 func (dc *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 	args := filters.NewArgs()
 	args.Add("status", "running")
@@ -56,31 +67,33 @@ func (dc *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
 		return nil, err
 	}
 
-	// Build imageID → RepoDigests map from a single ImageList call.
-	repoDigestsByID := buildRepoDigestsMap(ctx, dc)
+	// Build imageID → metadata map from a single ImageList call.
+	metaByID := buildImageMetadataMap(ctx, dc)
 
 	out := make([]ContainerInfo, 0, len(raw))
 	for _, c := range raw {
 		info := containerToInfo(c)
-		if digests, ok := repoDigestsByID[c.ImageID]; ok {
-			info.RepoDigests = digests
+		if meta, ok := metaByID[c.ImageID]; ok {
+			info.RepoDigests = meta.RepoDigests
+			info.ImageCreated = meta.Created
 		}
 		out = append(out, info)
 	}
 	return out, nil
 }
 
-// buildRepoDigestsMap fetches the local image list and returns a map of
-// imageID → RepoDigests. Errors are silently ignored (best-effort).
-func buildRepoDigestsMap(ctx context.Context, dc *Client) map[string][]string {
+// buildImageMetadataMap fetches the local image list and returns a map of
+// imageID → imageMetadata (RepoDigests + Created). Errors are silently ignored (best-effort).
+func buildImageMetadataMap(ctx context.Context, dc *Client) map[string]imageMetadata {
 	imgs, err := dc.c.ImageList(ctx, image.ListOptions{})
 	if err != nil {
 		return nil
 	}
-	m := make(map[string][]string, len(imgs))
+	m := make(map[string]imageMetadata, len(imgs))
 	for _, img := range imgs {
-		if len(img.RepoDigests) > 0 {
-			m[img.ID] = img.RepoDigests
+		m[img.ID] = imageMetadata{
+			RepoDigests: img.RepoDigests,
+			Created:     img.Created,
 		}
 	}
 	return m
