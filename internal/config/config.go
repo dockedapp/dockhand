@@ -70,7 +70,7 @@ type ServerConfig struct {
 
 type RunnerConfig struct {
 	Name            string `yaml:"name"`
-	URL             string `yaml:"url"`              // advertised URL; auto-detected if empty
+	URL             string `yaml:"url"` // advertised URL; auto-detected if empty
 	DockedURL       string `yaml:"docked_url"`
 	EnrollmentToken string `yaml:"enrollment_token"`
 }
@@ -178,7 +178,10 @@ func applyDefaults(cfg *Config) {
 			}
 			app.Operations[opName] = op
 		}
-		if app.PackageManager != "" && app.SystemUpdateCheck == "" {
+		// Always override system_update_check when package_manager is set.
+		// This ensures stale configs with old/buggy commands are corrected
+		// on upgrade without requiring the user to edit their config.
+		if app.PackageManager != "" {
 			if cmd, ok := packageManagerCommands[strings.ToLower(app.PackageManager)]; ok {
 				app.SystemUpdateCheck = cmd
 			}
