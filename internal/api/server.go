@@ -40,10 +40,22 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, confi
 	// Container routes (only registered if Docker is enabled)
 	if dc != nil && cfg.Docker.Enabled {
 		ch := handlers.NewContainerHandlers(dc, cfg.Docker.ComposeBinary)
+		// Listing / inspection
 		mux.Handle("GET /containers", auth(http.HandlerFunc(ch.List)))
 		mux.Handle("GET /containers/{id}", auth(http.HandlerFunc(ch.Get)))
+		mux.Handle("GET /containers/{id}/json", auth(http.HandlerFunc(ch.FullInspect)))
+		// Lifecycle management (used by the docked upgrade pipeline)
+		mux.Handle("POST /containers/{id}/stop", auth(http.HandlerFunc(ch.Stop)))
+		mux.Handle("POST /containers/{id}/start", auth(http.HandlerFunc(ch.Start)))
+		mux.Handle("DELETE /containers/{id}", auth(http.HandlerFunc(ch.Remove)))
+		mux.Handle("POST /containers/create", auth(http.HandlerFunc(ch.Create)))
+		// SSE streams (existing)
 		mux.Handle("POST /containers/{id}/upgrade", auth(http.HandlerFunc(ch.Upgrade)))
 		mux.Handle("GET /containers/{id}/logs", auth(http.HandlerFunc(ch.Logs)))
+		// Image management
+		mux.Handle("GET /images", auth(http.HandlerFunc(ch.ListImages)))
+		mux.Handle("POST /images/pull", auth(http.HandlerFunc(ch.PullImage)))
+		mux.Handle("DELETE /images/{id}", auth(http.HandlerFunc(ch.RemoveImage)))
 	}
 
 	// System routes — update, uninstall, reload, logs (always registered, authenticated)
