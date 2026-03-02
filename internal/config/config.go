@@ -70,6 +70,7 @@ type ServerConfig struct {
 
 type RunnerConfig struct {
 	Name            string `yaml:"name"`
+	URL             string `yaml:"url"`              // advertised URL; auto-detected if empty
 	DockedURL       string `yaml:"docked_url"`
 	EnrollmentToken string `yaml:"enrollment_token"`
 }
@@ -223,6 +224,9 @@ func applyEnvOverrides(cfg *Config) {
 	}
 	if v := os.Getenv("DOCKHAND_NAME"); v != "" {
 		cfg.Runner.Name = v
+	}
+	if v := os.Getenv("DOCKHAND_RUNNER_URL"); v != "" {
+		cfg.Runner.URL = v
 	}
 	if v := os.Getenv("DOCKHAND_DOCKED_URL"); v != "" {
 		cfg.Runner.DockedURL = v

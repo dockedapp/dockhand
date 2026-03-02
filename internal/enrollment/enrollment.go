@@ -125,9 +125,14 @@ func register(dockedURL, token, name, runnerURL, apiKey string) error {
 }
 
 // buildRunnerURL determines the URL that the Docked server should use to
-// reach this runner. It auto-detects the local IP by making a UDP dial to
-// the Docked server's host (no actual traffic is sent).
+// reach this runner. If runner.url / DOCKHAND_RUNNER_URL is set it is used
+// directly; otherwise the local IP is auto-detected via a UDP dial to the
+// Docked server's host (no actual traffic is sent).
 func buildRunnerURL(cfg *config.Config) (string, error) {
+	if cfg.Runner.URL != "" {
+		return cfg.Runner.URL, nil
+	}
+
 	parsed, err := url.Parse(cfg.Runner.DockedURL)
 	if err != nil {
 		return "", fmt.Errorf("parsing docked_url: %w", err)
