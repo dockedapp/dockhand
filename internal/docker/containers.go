@@ -24,6 +24,10 @@ type ContainerInfo struct {
 	Labels           map[string]string `json:"labels,omitempty"`
 	Ports            []PortBinding     `json:"ports,omitempty"`
 
+	// NetworkMode from HostConfig (e.g. "container:<id>", "service:<name>", "bridge").
+	// Used by Docked to display network dependency warnings before upgrading.
+	NetworkMode string `json:"networkMode,omitempty"`
+
 	// Compose info (populated when the container is part of a Compose project)
 	ComposeProject    string `json:"composeProject,omitempty"`
 	ComposeService    string `json:"composeService,omitempty"`
@@ -123,15 +127,16 @@ func containerToInfo(c types.Container) ContainerInfo {
 	}
 
 	info := ContainerInfo{
-		ID:      c.ID,
-		Name:    name,
-		Image:   c.Image,
-		ImageID: c.ImageID,
-		Status:  c.Status,
-		State:   c.State,
-		Created: c.Created,
-		Labels:  c.Labels,
-		Ports:   ports,
+		ID:          c.ID,
+		Name:        name,
+		Image:       c.Image,
+		ImageID:     c.ImageID,
+		Status:      c.Status,
+		State:       c.State,
+		Created:     c.Created,
+		Labels:      c.Labels,
+		Ports:       ports,
+		NetworkMode: c.HostConfig.NetworkMode,
 	}
 
 	if project, ok := c.Labels["com.docker.compose.project"]; ok {
