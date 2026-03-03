@@ -15,6 +15,7 @@ import (
 	"github.com/dockedapp/dockhand/internal/config"
 	"github.com/dockedapp/dockhand/internal/docker"
 	"github.com/dockedapp/dockhand/internal/enrollment"
+	"github.com/dockedapp/dockhand/internal/heartbeat"
 	"github.com/dockedapp/dockhand/internal/operations"
 )
 
@@ -82,6 +83,18 @@ func main() {
 			serverErr <- err
 		}
 	}()
+
+	// Start heartbeat — periodically phone home to Docked server so it
+	// knows our current URL (handles IP changes after restarts).
+	dockerOKFn := func() bool {
+		if dc == nil {
+			return false
+		}
+		pingCtx, pingCancel := context.WithTimeout(ctx, 3*time.Second)
+		defer pingCancel()
+		return dc.Ping(pingCtx) == nil
+	}
+	heartbeat.Start(ctx, cfg, api.Version, dockerOKFn)
 
 	quit := make(chan os.Signal, 1)
 	signal.Notify(quit, syscall.SIGINT, syscall.SIGTERM)
