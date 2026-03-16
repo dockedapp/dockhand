@@ -238,3 +238,72 @@ func writeMarker(dataDir string) {
 		log.Printf("enrollment: warning: could not write marker file: %v", err)
 	}
 }
+
+// reEnrollRequest is the JSON body sent to POST /api/runners/re-enroll.
+type reEnrollRequest struct {
+	Name   string `json:"name"`
+	URL    string `json:"url"`
+	APIKey string `json:"apiKey"`
+}
+
+// reEnrollResponse is the JSON response from the re-enroll endpoint.
+type reEnrollResponse struct {
+	Success  bool   `json:"success"`
+	RunnerID int    `json:"runnerId,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+// ReEnroll attempts to re-register with the Docked server without an
+// enrollment token. This is used when the heartbeat gets a 401 — meaning
+// the server no longer recognises this runner's API key (e.g. its DB was
+// rebuilt). The server matches by runner name and updates the stored API key.
+//
+// Returns nil on success, an error otherwise.
+func ReEnroll(cfg *config.Config) error {
+	if cfg.Runner.DockedURL == "" {
+		return fmt.Errorf("no docked_url configured")
+	}
+
+	runnerURL, err := BuildRunnerURL(cfg)
+	if err != nil {
+		return fmt.Errorf("determining runner URL: %w", err)
+	}
+
+	endpoint := cfg.Runner.DockedURL + "/api/runners/re-enroll"
+
+	body := reEnrollRequest{
+		Name:   cfg.Runner.Name,
+		URL:    runnerURL,
+		APIKey: cfg.Server.APIKey,
+	}
+	payload, err := json.Marshal(body)
+	if err != nil {
+		return fmt.Errorf("marshaling re-enroll request: %w", err)
+	}
+
+	client := &http.Client{Timeout: httpTimeout}
+	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("POST %s: %w", endpoint, err)
+	}
+	defer resp.Body.Close()
+
+	var result reEnrollResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return fmt.Errorf("decoding re-enroll response (status %d): %w", resp.StatusCode, err)
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return fmt.Errorf("server has no runner named %q — manual enrollment required", cfg.Runner.Name)
+	}
+
+	if resp.StatusCode != http.StatusOK || !result.Success {
+		errMsg := result.Error
+		if errMsg == "" {
+			errMsg = "unknown error"
+		}
+		return fmt.Errorf("re-enroll failed (status %d): %s", resp.StatusCode, errMsg)
+	}
+
+	return nil
+}
