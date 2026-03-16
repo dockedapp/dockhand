@@ -76,10 +76,18 @@ func run(ctx context.Context, cfg *config.Config, version string, dockerOK func(
 	for {
 		err := sendHeartbeat(cfg, version, dockerOK)
 		if err != nil {
-			// Fatal errors (e.g. 401) should stop the heartbeat loop
+			// On 401, attempt automatic re-enrollment before giving up
 			if isFatal(err) {
-				log.Printf("heartbeat: stopping due to fatal error: %v", err)
-				return
+				log.Printf("heartbeat: got 401 — attempting automatic re-enrollment with Docked server")
+				if reErr := enrollment.ReEnroll(cfg); reErr != nil {
+					log.Printf("heartbeat: re-enrollment failed: %v", reErr)
+					log.Println("heartbeat: stopping heartbeat. To fix: generate a new enrollment token in Docked and redeploy this runner.")
+					return
+				}
+				log.Println("heartbeat: re-enrollment succeeded — resuming heartbeat")
+				consecutiveFailures = 0
+				// Immediately retry the heartbeat now that re-enrollment succeeded
+				continue
 			}
 
 			consecutiveFailures++
@@ -143,12 +151,8 @@ func sendHeartbeat(cfg *config.Config, version string, dockerOK func() bool) err
 	}
 
 	if resp.StatusCode == http.StatusUnauthorized {
-		// Server doesn't recognize our API key. This typically means either:
-		// 1. The runner was deleted from Docked and needs to be re-enrolled
-		// 2. The data volume was lost and a new API key was generated
-		log.Println("heartbeat: Docked server does not recognize this runner (401). " +
-			"The runner may have been removed from Docked. " +
-			"To fix: generate a new enrollment token in Docked and redeploy this runner.")
+		// Server doesn't recognize our API key. The caller (run loop)
+		// will attempt automatic re-enrollment before giving up.
 		return &fatalError{fmt.Errorf("server returned 401: %s", result.Error)}
 	}
 
