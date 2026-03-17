@@ -19,6 +19,8 @@ import (
 	"github.com/dockedapp/dockhand/internal/operations"
 )
 
+const dockerRetryInterval = 30 * time.Second
+
 func main() {
 	configPath := flag.String("config", "/etc/dockhand/config.yaml", "path to config file")
 	flag.Parse()
@@ -35,20 +37,29 @@ func main() {
 	// or no enrollment token is configured).
 	enrollment.Run(cfg, *configPath)
 
-	// Docker client (optional — skipped if Docker is disabled or unavailable)
+	// Docker client (optional — skipped if Docker is disabled or unavailable).
+	// Wrapped in AtomicClient so the background retry loop can connect later.
 	var dc *docker.Client
+	socket := cfg.Docker.Socket
 	if cfg.Docker.Enabled {
-		dc, err = docker.New(cfg.Docker.Socket)
+		dc, err = docker.New(socket)
 		if err != nil {
-			log.Printf("warning: docker unavailable: %v (container features disabled)", err)
+			log.Printf("warning: docker unavailable: %v (will retry in background)", err)
 		} else {
-			ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-			if pingErr := dc.Ping(ctx); pingErr != nil {
-				log.Printf("warning: docker ping failed: %v (container features disabled)", pingErr)
+			pingCtx, pingCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			if pingErr := dc.Ping(pingCtx); pingErr != nil {
+				log.Printf("warning: docker ping failed: %v (will retry in background)", pingErr)
 				dc = nil
 			}
-			cancel()
+			pingCancel()
 		}
+	}
+
+	adc := docker.NewAtomicClient(dc, socket)
+
+	// If Docker is enabled but not yet connected, retry in the background.
+	if cfg.Docker.Enabled && adc.Get() == nil {
+		go dockerRetryLoop(ctx, adc)
 	}
 
 	// Operation history DB
@@ -74,7 +85,7 @@ func main() {
 	})
 
 	// HTTP server
-	srv := api.New(cfg, dc, runner, *configPath)
+	srv := api.New(cfg, adc, runner, *configPath)
 
 	// Run server in background; block on OS signal
 	serverErr := make(chan error, 1)
@@ -87,6 +98,7 @@ func main() {
 	// Start heartbeat — periodically phone home to Docked server so it
 	// knows our current URL (handles IP changes after restarts).
 	dockerOKFn := func() bool {
+		dc := adc.Get()
 		if dc == nil {
 			return false
 		}
@@ -112,8 +124,45 @@ func main() {
 		log.Printf("shutdown error: %v", err)
 	}
 
-	if dc != nil {
-		dc.Close()
+	if finalDC := adc.Get(); finalDC != nil {
+		finalDC.Close()
 	}
 	log.Println("shutdown complete")
+}
+
+// dockerRetryLoop periodically attempts to connect to the Docker daemon.
+// Once connected, it stores the client in the AtomicClient and returns.
+// If Docker later becomes unavailable, the per-request health check in
+// each handler and the heartbeat dockerOK function will detect it. A full
+// reconnect (new SDK client) would require another restart, but the common
+// case — Docker was starting up when dockhand launched — is handled here.
+func dockerRetryLoop(ctx context.Context, adc *docker.AtomicClient) {
+	socket := adc.Socket()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(dockerRetryInterval):
+		}
+
+		dc, err := docker.New(socket)
+		if err != nil {
+			log.Printf("docker retry: client init failed: %v", err)
+			continue
+		}
+
+		pingCtx, pingCancel := context.WithTimeout(ctx, 5*time.Second)
+		pingErr := dc.Ping(pingCtx)
+		pingCancel()
+
+		if pingErr != nil {
+			log.Printf("docker retry: ping failed: %v", pingErr)
+			dc.Close()
+			continue
+		}
+
+		adc.Set(dc)
+		log.Println("docker retry: connected — container features now available")
+		return
+	}
 }

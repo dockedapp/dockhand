@@ -21,13 +21,14 @@ type Server struct {
 }
 
 // New constructs the HTTP server, wires all routes, and returns it ready to start.
-func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, configPath string) *Server {
+func New(cfg *config.Config, adc *docker.AtomicClient, runner *operations.Runner, configPath string) *Server {
 	mux := http.NewServeMux()
 
 	auth := middleware.Auth(cfg.Server.APIKey)
 
 	// Health — unauthenticated so Docked can probe before a key is set
 	dockerOK := func() bool {
+		dc := adc.Get()
 		if dc == nil {
 			return false
 		}
@@ -37,26 +38,26 @@ func New(cfg *config.Config, dc *docker.Client, runner *operations.Runner, confi
 	}
 	mux.HandleFunc("GET /health", handlers.Health(Version, cfg.Runner.Name, dockerOK))
 
-	// Container routes (only registered if Docker is enabled)
-	if dc != nil && cfg.Docker.Enabled {
-		ch := handlers.NewContainerHandlers(dc, cfg.Docker.ComposeBinary)
-		// Listing / inspection
-		mux.Handle("GET /containers", auth(http.HandlerFunc(ch.List)))
-		mux.Handle("GET /containers/{id}", auth(http.HandlerFunc(ch.Get)))
-		mux.Handle("GET /containers/{id}/json", auth(http.HandlerFunc(ch.FullInspect)))
-		// Lifecycle management (used by the docked upgrade pipeline)
-		mux.Handle("POST /containers/{id}/stop", auth(http.HandlerFunc(ch.Stop)))
-		mux.Handle("POST /containers/{id}/start", auth(http.HandlerFunc(ch.Start)))
-		mux.Handle("DELETE /containers/{id}", auth(http.HandlerFunc(ch.Remove)))
-		mux.Handle("POST /containers/create", auth(http.HandlerFunc(ch.Create)))
-		// SSE streams (existing)
-		mux.Handle("POST /containers/{id}/upgrade", auth(http.HandlerFunc(ch.Upgrade)))
-		mux.Handle("GET /containers/{id}/logs", auth(http.HandlerFunc(ch.Logs)))
-		// Image management
-		mux.Handle("GET /images", auth(http.HandlerFunc(ch.ListImages)))
-		mux.Handle("POST /images/pull", auth(http.HandlerFunc(ch.PullImage)))
-		mux.Handle("DELETE /images/{id}", auth(http.HandlerFunc(ch.RemoveImage)))
-	}
+	// Container routes — always registered. Each handler checks if Docker
+	// is available at request time and returns 503 if not. This allows
+	// Docker to become available after startup without a restart.
+	ch := handlers.NewContainerHandlers(adc, cfg.Docker.ComposeBinary)
+	// Listing / inspection
+	mux.Handle("GET /containers", auth(http.HandlerFunc(ch.List)))
+	mux.Handle("GET /containers/{id}", auth(http.HandlerFunc(ch.Get)))
+	mux.Handle("GET /containers/{id}/json", auth(http.HandlerFunc(ch.FullInspect)))
+	// Lifecycle management (used by the docked upgrade pipeline)
+	mux.Handle("POST /containers/{id}/stop", auth(http.HandlerFunc(ch.Stop)))
+	mux.Handle("POST /containers/{id}/start", auth(http.HandlerFunc(ch.Start)))
+	mux.Handle("DELETE /containers/{id}", auth(http.HandlerFunc(ch.Remove)))
+	mux.Handle("POST /containers/create", auth(http.HandlerFunc(ch.Create)))
+	// SSE streams (existing)
+	mux.Handle("POST /containers/{id}/upgrade", auth(http.HandlerFunc(ch.Upgrade)))
+	mux.Handle("GET /containers/{id}/logs", auth(http.HandlerFunc(ch.Logs)))
+	// Image management
+	mux.Handle("GET /images", auth(http.HandlerFunc(ch.ListImages)))
+	mux.Handle("POST /images/pull", auth(http.HandlerFunc(ch.PullImage)))
+	mux.Handle("DELETE /images/{id}", auth(http.HandlerFunc(ch.RemoveImage)))
 
 	// System routes — update, uninstall, reload, logs (always registered, authenticated)
 	mux.Handle("POST /update", auth(http.HandlerFunc(handlers.Update)))
