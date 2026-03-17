@@ -59,9 +59,10 @@ func New(cfg *config.Config, adc *docker.AtomicClient, runner *operations.Runner
 	mux.Handle("POST /images/pull", auth(http.HandlerFunc(ch.PullImage)))
 	mux.Handle("DELETE /images/{id}", auth(http.HandlerFunc(ch.RemoveImage)))
 
-	// System routes — update, uninstall, reload, logs (always registered, authenticated)
+	// System routes — update, uninstall, restart, reload, logs (always registered, authenticated)
 	mux.Handle("POST /update", auth(http.HandlerFunc(handlers.Update)))
 	mux.Handle("POST /uninstall", auth(http.HandlerFunc(handlers.Uninstall)))
+	mux.Handle("POST /restart", auth(http.HandlerFunc(handlers.Restart)))
 	mux.Handle("POST /reload", auth(handlers.Reload(configPath, runner)))
 	mux.Handle("GET /logs", auth(http.HandlerFunc(handlers.Logs)))
 
