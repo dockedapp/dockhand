@@ -105,6 +105,23 @@ func Update(w http.ResponseWriter, r *http.Request) {
 	}()
 }
 
+// Restart handles POST /restart
+// Responds immediately, then triggers a systemd restart of the dockhand service.
+func Restart(w http.ResponseWriter, r *http.Request) {
+	writeJSON(w, map[string]any{
+		"success": true,
+		"message": "Restarting dockhand...",
+	})
+
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		log.Printf("restart requested — restarting via systemd")
+		if err := exec.Command("systemctl", "restart", "dockhand").Run(); err != nil {
+			log.Printf("systemctl restart failed: %v — restart manually if needed", err)
+		}
+	}()
+}
+
 // Uninstall handles POST /uninstall
 // Responds immediately, then asynchronously removes all dockhand files and
 // signals itself to exit cleanly. Files are deleted BEFORE the process stops
