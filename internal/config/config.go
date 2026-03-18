@@ -251,7 +251,7 @@ func resolveAPIKey(cfg *Config) error {
 
 	// Try persisted key file
 	if data, err := os.ReadFile(apiKeyFile); err == nil {
-		key := string(data)
+		key := strings.TrimSpace(string(data))
 		if len(key) >= 32 {
 			cfg.Server.APIKey = key
 			return nil
@@ -293,7 +293,8 @@ func DataDir() string {
 }
 
 // ClearEnrollmentToken re-reads the config file, removes the enrollment_token
-// field, and writes the file back. This is called after successful enrollment.
+// field, and writes the file back. Uses yaml.Node to preserve comments and
+// key ordering.
 func ClearEnrollmentToken(path string) error {
 	if path == "" {
 		return nil
@@ -304,18 +305,40 @@ func ClearEnrollmentToken(path string) error {
 		return fmt.Errorf("reading config to clear token: %w", err)
 	}
 
-	// Parse into a generic map to preserve all other fields
-	var raw map[string]interface{}
-	if err := yaml.Unmarshal(data, &raw); err != nil {
+	var doc yaml.Node
+	if err := yaml.Unmarshal(data, &doc); err != nil {
 		return fmt.Errorf("parsing config to clear token: %w", err)
 	}
 
-	// Remove enrollment_token from the runner section
-	if runner, ok := raw["runner"].(map[string]interface{}); ok {
-		delete(runner, "enrollment_token")
+	// doc is a Document node; its first child is the top-level mapping.
+	if doc.Kind != yaml.DocumentNode || len(doc.Content) == 0 {
+		return fmt.Errorf("unexpected YAML structure")
+	}
+	topMap := doc.Content[0]
+	if topMap.Kind != yaml.MappingNode {
+		return fmt.Errorf("expected top-level mapping")
 	}
 
-	out, err := yaml.Marshal(raw)
+	// Find the "runner" key in the top-level mapping.
+	for i := 0; i < len(topMap.Content)-1; i += 2 {
+		if topMap.Content[i].Value == "runner" {
+			runnerMap := topMap.Content[i+1]
+			if runnerMap.Kind != yaml.MappingNode {
+				break
+			}
+			// Find and remove "enrollment_token" from the runner mapping.
+			for j := 0; j < len(runnerMap.Content)-1; j += 2 {
+				if runnerMap.Content[j].Value == "enrollment_token" {
+					// Remove key+value (2 elements)
+					runnerMap.Content = append(runnerMap.Content[:j], runnerMap.Content[j+2:]...)
+					break
+				}
+			}
+			break
+		}
+	}
+
+	out, err := yaml.Marshal(&doc)
 	if err != nil {
 		return fmt.Errorf("marshaling config: %w", err)
 	}

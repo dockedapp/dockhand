@@ -167,6 +167,11 @@ func (r *Runner) backgroundRefresh() {
 	}
 }
 
+// Stop terminates the background refresh goroutine. Call during shutdown.
+func (r *Runner) Stop() {
+	close(r.stopRefresh)
+}
+
 // runVersionCommandStr runs a version command string via bash and returns the last non-empty line.
 // workingDir is taken from the first app operation with a non-empty WorkingDir, if any.
 func (r *Runner) runVersionCommandStr(ctx context.Context, versionCommand string, ops map[string]AppOpConfig) (string, error) {
@@ -674,6 +679,17 @@ func (r *Runner) Apps() map[string]config.App {
 	defer r.mu.Unlock()
 	cp := make(map[string]config.App, len(r.apps))
 	for k, v := range r.apps {
+		cp[k] = v
+	}
+	return cp
+}
+
+// Operations returns a snapshot of the current operations map.
+func (r *Runner) Operations() map[string]config.Operation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make(map[string]config.Operation, len(r.ops))
+	for k, v := range r.ops {
 		cp[k] = v
 	}
 	return cp

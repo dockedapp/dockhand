@@ -34,8 +34,9 @@ func main() {
 	defer cancel()
 
 	// Attempt enrollment with Docked server (no-ops if already registered
-	// or no enrollment token is configured).
-	enrollment.Run(cfg, *configPath)
+	// or no enrollment token is configured). Runs in the background so it
+	// doesn't block startup if the Docked server is temporarily unreachable.
+	go enrollment.Run(cfg, *configPath)
 
 	// Docker client (optional — skipped if Docker is disabled or unavailable).
 	// Wrapped in AtomicClient so the background retry loop can connect later.
@@ -71,6 +72,7 @@ func main() {
 	defer histDB.Close()
 
 	runner := operations.NewRunner(cfg.Operations, cfg.Apps, histDB, *configPath)
+	defer runner.Stop()
 
 	// Watch config file — reload operations/apps automatically on save
 	go config.Watch(ctx, *configPath, 2*time.Second, func() {
@@ -85,7 +87,7 @@ func main() {
 	})
 
 	// HTTP server
-	srv := api.New(cfg, adc, runner, *configPath)
+	srv := api.New(cfg, adc, runner, *configPath, histDB)
 
 	// Run server in background; block on OS signal
 	serverErr := make(chan error, 1)

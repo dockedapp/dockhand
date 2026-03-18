@@ -234,7 +234,7 @@ func IsRegistered(dataDir string) bool {
 // writeMarker creates the .registered marker file in the data directory.
 func writeMarker(dataDir string) {
 	path := filepath.Join(dataDir, registeredMarker)
-	if err := os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339)), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339)), 0600); err != nil {
 		log.Printf("enrollment: warning: could not write marker file: %v", err)
 	}
 }
@@ -282,7 +282,16 @@ func ReEnroll(cfg *config.Config) error {
 	}
 
 	client := &http.Client{Timeout: httpTimeout}
-	resp, err := client.Post(endpoint, "application/json", bytes.NewReader(payload))
+	req, err := http.NewRequest(http.MethodPost, endpoint, bytes.NewReader(payload))
+	if err != nil {
+		return fmt.Errorf("creating re-enroll request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	// Present the current API key so the server can verify our identity
+	if cfg.Server.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+cfg.Server.APIKey)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("POST %s: %w", endpoint, err)
 	}
