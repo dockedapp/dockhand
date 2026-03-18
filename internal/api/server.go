@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"time"
@@ -21,7 +22,7 @@ type Server struct {
 }
 
 // New constructs the HTTP server, wires all routes, and returns it ready to start.
-func New(cfg *config.Config, adc *docker.AtomicClient, runner *operations.Runner, configPath string) *Server {
+func New(cfg *config.Config, adc *docker.AtomicClient, runner *operations.Runner, configPath string, histDB io.Closer) *Server {
 	mux := http.NewServeMux()
 
 	auth := middleware.Auth(cfg.Server.APIKey)
@@ -61,7 +62,7 @@ func New(cfg *config.Config, adc *docker.AtomicClient, runner *operations.Runner
 
 	// System routes — update, uninstall, restart, reload, logs (always registered, authenticated)
 	mux.Handle("POST /update", auth(http.HandlerFunc(handlers.Update)))
-	mux.Handle("POST /uninstall", auth(http.HandlerFunc(handlers.Uninstall)))
+	mux.Handle("POST /uninstall", auth(handlers.Uninstall(histDB)))
 	mux.Handle("POST /restart", auth(http.HandlerFunc(handlers.Restart)))
 	mux.Handle("POST /reload", auth(handlers.Reload(configPath, runner)))
 	mux.Handle("GET /logs", auth(http.HandlerFunc(handlers.Logs)))
@@ -70,7 +71,7 @@ func New(cfg *config.Config, adc *docker.AtomicClient, runner *operations.Runner
 	// has no operations yet (e.g. fresh install) and after POST /reload adds some.
 	// NOTE: static paths (/operations/history) must come before parameterised
 	// paths (/operations/{name}/...) to avoid ambiguity.
-	oh := handlers.NewOperationHandlers(cfg.Operations, runner)
+	oh := handlers.NewOperationHandlers(runner)
 	mux.Handle("GET /operations", auth(http.HandlerFunc(oh.List)))
 	mux.Handle("GET /operations/history", auth(http.HandlerFunc(oh.AllHistory)))
 	mux.Handle("POST /operations/{name}/run", auth(http.HandlerFunc(oh.Run)))

@@ -42,6 +42,9 @@ func (dc *Client) StreamLogs(ctx context.Context, id string, opts LogOptions, li
 		_, err := stdcopy.StdCopy(pw, pw, rc)
 		pw.CloseWithError(err)
 	}()
+	// Close the pipe reader when we're done scanning so the StdCopy
+	// goroutine gets a write error and exits instead of leaking.
+	defer pr.Close()
 
 	scanner := bufio.NewScanner(pr)
 	for scanner.Scan() {

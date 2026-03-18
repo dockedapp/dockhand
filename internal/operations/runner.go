@@ -679,6 +679,17 @@ func (r *Runner) Apps() map[string]config.App {
 	return cp
 }
 
+// Operations returns a snapshot of the current operations map.
+func (r *Runner) Operations() map[string]config.Operation {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	cp := make(map[string]config.Operation, len(r.ops))
+	for k, v := range r.ops {
+		cp[k] = v
+	}
+	return cp
+}
+
 func truncate(s string, maxBytes int) string {
 	if len(s) <= maxBytes {
 		return s
