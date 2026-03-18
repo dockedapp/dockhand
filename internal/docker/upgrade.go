@@ -80,7 +80,17 @@ func (dc *Client) upgradeCompose(ctx context.Context, info *ContainerInfo, compo
 		return nil, fmt.Errorf("compose up: %w", err)
 	}
 
-	return &UpgradeResult{Strategy: "compose", OldImage: info.Image, NewImage: info.Image}, nil
+	// Re-inspect to get the new container's image after compose up.
+	newImage := info.Image
+	newInfo, err := dc.InspectContainer(ctx, info.Name)
+	if err == nil && newInfo != nil {
+		newImage = newInfo.Image
+		if newInfo.ImageID != "" {
+			newImage = newInfo.ImageID
+		}
+	}
+
+	return &UpgradeResult{Strategy: "compose", OldImage: info.Image, NewImage: newImage}, nil
 }
 
 // upgradeStandalone pulls the new image then stops-recreate-starts the container.
@@ -196,24 +206,18 @@ func (dc *Client) pullImage(ctx context.Context, ref string, output func(string)
 }
 
 // buildNetworkConfig reconstructs a NetworkingConfig from a ContainerJSON.
+// Only user-configured fields (IPAMConfig, Links, Aliases) are preserved.
+// Ephemeral fields (NetworkID, EndpointID, Gateway, IPAddress, etc.) are
+// omitted — Docker assigns them when the container connects to the network.
 func buildNetworkConfig(inspect types.ContainerJSON) *network.NetworkingConfig {
 	cfg := &network.NetworkingConfig{
 		EndpointsConfig: make(map[string]*network.EndpointSettings),
 	}
 	for netName, ep := range inspect.NetworkSettings.Networks {
 		cfg.EndpointsConfig[netName] = &network.EndpointSettings{
-			IPAMConfig:          ep.IPAMConfig,
-			Links:               ep.Links,
-			Aliases:             ep.Aliases,
-			NetworkID:           ep.NetworkID,
-			EndpointID:          ep.EndpointID,
-			Gateway:             ep.Gateway,
-			IPAddress:           ep.IPAddress,
-			IPPrefixLen:         ep.IPPrefixLen,
-			IPv6Gateway:         ep.IPv6Gateway,
-			GlobalIPv6Address:   ep.GlobalIPv6Address,
-			GlobalIPv6PrefixLen: ep.GlobalIPv6PrefixLen,
-			MacAddress:          ep.MacAddress,
+			IPAMConfig: ep.IPAMConfig,
+			Links:      ep.Links,
+			Aliases:    ep.Aliases,
 		}
 	}
 	return cfg

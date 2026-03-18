@@ -26,12 +26,12 @@ CREATE INDEX IF NOT EXISTS idx_op_name ON operation_history(operation_name);
 
 // HistoryRecord is a single operation run stored in the database.
 type HistoryRecord struct {
-	ID            int64     `json:"id"`
-	OperationName string    `json:"operationName"`
-	StartedAt     time.Time `json:"startedAt"`
+	ID            int64      `json:"id"`
+	OperationName string     `json:"operationName"`
+	StartedAt     time.Time  `json:"startedAt"`
 	FinishedAt    *time.Time `json:"finishedAt,omitempty"`
-	ExitCode      *int      `json:"exitCode,omitempty"`
-	Output        string    `json:"output"`
+	ExitCode      *int       `json:"exitCode,omitempty"`
+	Output        string     `json:"output"`
 }
 
 // DB wraps the SQLite connection for operation history.
@@ -45,6 +45,9 @@ func OpenDB(dataDir string) (*DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
 		return nil, fmt.Errorf("open history db: %w", err)
+	}
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return nil, fmt.Errorf("set WAL mode: %w", err)
 	}
 	if _, err := db.Exec(schema); err != nil {
 		return nil, fmt.Errorf("init schema: %w", err)
