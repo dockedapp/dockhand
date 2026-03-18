@@ -70,6 +70,18 @@ func New(cfg *config.Config, adc *docker.AtomicClient, runner *operations.Runner
 	mux.Handle("POST /images/pull", auth(bodyLimit(http.HandlerFunc(ch.PullImage))))
 	mux.Handle("DELETE /images/{id}", auth(http.HandlerFunc(ch.RemoveImage)))
 
+	// Debug routes — authenticated, read-mostly endpoints for AI/operator introspection
+	dh := handlers.NewDebugHandlers(adc, Version, cfg)
+	mux.Handle("GET /debug/health", auth(http.HandlerFunc(dh.Health)))
+	mux.Handle("GET /debug/logs", auth(http.HandlerFunc(handlers.Logs)))
+	mux.Handle("GET /debug/containers", auth(http.HandlerFunc(dh.Containers)))
+	mux.Handle("GET /debug/container/{id}/inspect", auth(http.HandlerFunc(dh.Inspect)))
+	mux.Handle("GET /debug/container/{id}/logs", auth(http.HandlerFunc(dh.ContainerLogs)))
+	mux.Handle("GET /debug/container/{id}/stats", auth(http.HandlerFunc(dh.Stats)))
+	mux.Handle("POST /debug/container/{id}/restart", auth(http.HandlerFunc(dh.Restart)))
+	mux.Handle("GET /debug/docker/info", auth(http.HandlerFunc(dh.DockerInfo)))
+	mux.Handle("GET /debug/docker/df", auth(http.HandlerFunc(dh.DockerDF)))
+
 	// System routes — update, uninstall, restart, reload, logs (always registered, authenticated)
 	mux.Handle("POST /update", auth(bodyLimit(http.HandlerFunc(handlers.Update))))
 	mux.Handle("POST /uninstall", auth(bodyLimit(handlers.Uninstall(histDB))))
