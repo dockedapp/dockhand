@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
@@ -100,27 +101,84 @@ func buildImageMetadataMap(ctx context.Context, dc *Client) map[string]imageMeta
 }
 
 // InspectContainer returns the ContainerInfo for a single container by ID or name.
+// Uses the Docker inspect API directly instead of listing all containers.
 // Returns nil, nil when the container is not found.
 func (dc *Client) InspectContainer(ctx context.Context, id string) (*ContainerInfo, error) {
-	all, err := dc.c.ContainerList(ctx, container.ListOptions{All: true})
+	inspect, err := dc.c.ContainerInspect(ctx, id)
 	if err != nil {
+		// Docker returns a 404 when the container doesn't exist.
+		if strings.Contains(err.Error(), "No such container") ||
+			strings.Contains(err.Error(), "not found") {
+			return nil, nil
+		}
 		return nil, err
 	}
-	idLower := strings.ToLower(id)
-	for _, c := range all {
-		if strings.ToLower(c.ID) == idLower ||
-			strings.HasPrefix(strings.ToLower(c.ID), idLower) {
-			info := containerToInfo(c)
-			return &info, nil
-		}
-		for _, n := range c.Names {
-			if strings.ToLower(strings.TrimPrefix(n, "/")) == idLower {
-				info := containerToInfo(c)
-				return &info, nil
+	info := inspectToInfo(inspect)
+	return &info, nil
+}
+
+// inspectToInfo converts a full ContainerJSON (from inspect) to ContainerInfo.
+func inspectToInfo(c types.ContainerJSON) ContainerInfo {
+	name := strings.TrimPrefix(c.Name, "/")
+
+	ports := make([]PortBinding, 0)
+	if c.NetworkSettings != nil {
+		for portProto, bindings := range c.NetworkSettings.Ports {
+			parts := strings.SplitN(string(portProto), "/", 2)
+			cPort := parts[0]
+			proto := "tcp"
+			if len(parts) == 2 {
+				proto = parts[1]
+			}
+			if len(bindings) == 0 {
+				ports = append(ports, PortBinding{
+					ContainerPort: cPort,
+					Protocol:      proto,
+				})
+				continue
+			}
+			for _, b := range bindings {
+				ports = append(ports, PortBinding{
+					HostIP:        b.HostIP,
+					HostPort:      b.HostPort,
+					ContainerPort: cPort,
+					Protocol:      proto,
+				})
 			}
 		}
 	}
-	return nil, nil
+
+	networkMode := ""
+	if c.HostConfig != nil {
+		networkMode = string(c.HostConfig.NetworkMode)
+	}
+
+	var created int64
+	if t, err := time.Parse(time.RFC3339Nano, c.Created); err == nil {
+		created = t.Unix()
+	}
+
+	info := ContainerInfo{
+		ID:          c.ID,
+		Name:        name,
+		Image:       c.Config.Image,
+		ImageID:     c.Image,
+		Status:      c.State.Status,
+		State:       c.State.Status,
+		Created:     created,
+		Labels:      c.Config.Labels,
+		Ports:       ports,
+		NetworkMode: networkMode,
+	}
+
+	if project, ok := c.Config.Labels["com.docker.compose.project"]; ok {
+		info.ComposeProject = project
+		info.ComposeService = c.Config.Labels["com.docker.compose.service"]
+		info.ComposeWorkingDir = c.Config.Labels["com.docker.compose.project.working_dir"]
+		info.ComposeConfigFile = c.Config.Labels["com.docker.compose.project.config_files"]
+	}
+
+	return info
 }
 
 func containerToInfo(c types.Container) ContainerInfo {

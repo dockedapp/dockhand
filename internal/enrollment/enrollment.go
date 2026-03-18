@@ -234,7 +234,7 @@ func IsRegistered(dataDir string) bool {
 // writeMarker creates the .registered marker file in the data directory.
 func writeMarker(dataDir string) {
 	path := filepath.Join(dataDir, registeredMarker)
-	if err := os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339)), 0644); err != nil {
+	if err := os.WriteFile(path, []byte(time.Now().UTC().Format(time.RFC3339)), 0600); err != nil {
 		log.Printf("enrollment: warning: could not write marker file: %v", err)
 	}
 }

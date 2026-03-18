@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 )
 
 // Writer wraps an http.ResponseWriter for SSE output.
@@ -26,8 +27,13 @@ func New(w http.ResponseWriter) *Writer {
 }
 
 // Send emits a named event with a plain-text data payload.
+// Multi-line data is split so each line gets its own "data:" field per the SSE spec.
 func (s *Writer) Send(event, data string) {
-	fmt.Fprintf(s.w, "event: %s\ndata: %s\n\n", event, data)
+	fmt.Fprintf(s.w, "event: %s\n", event)
+	for _, line := range strings.Split(data, "\n") {
+		fmt.Fprintf(s.w, "data: %s\n", line)
+	}
+	fmt.Fprint(s.w, "\n")
 	s.rc.Flush()
 }
 

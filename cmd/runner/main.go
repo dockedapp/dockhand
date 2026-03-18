@@ -72,6 +72,7 @@ func main() {
 	defer histDB.Close()
 
 	runner := operations.NewRunner(cfg.Operations, cfg.Apps, histDB, *configPath)
+	defer runner.Stop()
 
 	// Watch config file — reload operations/apps automatically on save
 	go config.Watch(ctx, *configPath, 2*time.Second, func() {

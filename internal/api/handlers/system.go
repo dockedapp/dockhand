@@ -19,6 +19,36 @@ import (
 	"github.com/dockedapp/dockhand/internal/operations"
 )
 
+// safeHTTPClient returns an HTTP client that only follows redirects to the
+// same host or to known-safe GitHub hosts, preventing open-redirect abuse.
+func safeHTTPClient(originalHost string) *http.Client {
+	allowed := map[string]bool{
+		"github.com":                            true,
+		"objects.githubusercontent.com":         true,
+		"github-releases.githubusercontent.com": true,
+	}
+	return &http.Client{
+		Timeout: 5 * time.Minute,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) > 10 {
+				return fmt.Errorf("too many redirects")
+			}
+			host := req.URL.Hostname()
+			if host == originalHost || allowed[host] {
+				return nil
+			}
+			return fmt.Errorf("redirect to untrusted host %q blocked", host)
+		},
+	}
+}
+
+const (
+	// maxBinaryDownloadBytes caps binary downloads at 500 MiB.
+	maxBinaryDownloadBytes = 500 << 20
+	// maxChecksumDownloadBytes caps checksum file downloads at 1 MiB.
+	maxChecksumDownloadBytes = 1 << 20
+)
+
 type updateRequest struct {
 	Version string `json:"version"`
 }
@@ -203,7 +233,8 @@ func Reload(configPath string, runner *operations.Runner) http.HandlerFunc {
 // verifyChecksum downloads the SHA256SUMS file for the release and checks
 // that the file at filePath matches the expected hash for binaryName.
 func verifyChecksum(filePath, binaryName, checksumsURL string) error {
-	resp, err := http.Get(checksumsURL) //nolint:gosec
+	client := safeHTTPClient("github.com")
+	resp, err := client.Get(checksumsURL) //nolint:gosec
 	if err != nil {
 		return fmt.Errorf("fetch checksums: %w", err)
 	}
@@ -214,7 +245,8 @@ func verifyChecksum(filePath, binaryName, checksumsURL string) error {
 
 	// Parse "<hash>  <filename>" lines (sha256sum / BSD format)
 	var expected string
-	scanner := bufio.NewScanner(resp.Body)
+	limited := io.LimitReader(resp.Body, maxChecksumDownloadBytes)
+	scanner := bufio.NewScanner(limited)
 	for scanner.Scan() {
 		parts := strings.Fields(scanner.Text())
 		if len(parts) == 2 && parts[1] == binaryName {
@@ -244,7 +276,8 @@ func verifyChecksum(filePath, binaryName, checksumsURL string) error {
 }
 
 func downloadBinary(url, dest string) error {
-	resp, err := http.Get(url) //nolint:gosec
+	client := safeHTTPClient("github.com")
+	resp, err := client.Get(url) //nolint:gosec
 	if err != nil {
 		return err
 	}
@@ -252,12 +285,13 @@ func downloadBinary(url, dest string) error {
 	if resp.StatusCode != http.StatusOK {
 		return fmt.Errorf("HTTP %d downloading binary", resp.StatusCode)
 	}
-	f, err := os.Create(dest)
+	f, err := os.OpenFile(dest, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0700)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	if _, err = io.Copy(f, resp.Body); err != nil {
+	limited := io.LimitReader(resp.Body, maxBinaryDownloadBytes)
+	if _, err = io.Copy(f, limited); err != nil {
 		return err
 	}
 	return f.Sync()
