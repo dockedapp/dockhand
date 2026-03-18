@@ -274,7 +274,7 @@ func (h *containerHandlers) PullImage(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ref := req.FromImage
-	if req.Tag != "" && req.Tag != "latest" {
+	if req.Tag != "" {
 		ref = req.FromImage + ":" + req.Tag
 	}
 	if ref == "" {

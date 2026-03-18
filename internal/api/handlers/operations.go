@@ -5,19 +5,19 @@ import (
 	"sort"
 	"strconv"
 
-	"github.com/dockedapp/dockhand/internal/config"
 	"github.com/dockedapp/dockhand/internal/operations"
 	"github.com/dockedapp/dockhand/internal/sse"
 )
 
 type opHandlers struct {
-	ops    map[string]config.Operation
 	runner *operations.Runner
 }
 
 // NewOperationHandlers returns a group of operation-related handlers.
-func NewOperationHandlers(ops map[string]config.Operation, runner *operations.Runner) *opHandlers {
-	return &opHandlers{ops: ops, runner: runner}
+// Operations are read from the runner dynamically so that POST /reload
+// updates are reflected without restarting.
+func NewOperationHandlers(runner *operations.Runner) *opHandlers {
+	return &opHandlers{runner: runner}
 }
 
 // VersionSourceInfo is the JSON representation of a version source.
@@ -38,8 +38,9 @@ type OperationSummary struct {
 
 // List handles GET /operations
 func (h *opHandlers) List(w http.ResponseWriter, r *http.Request) {
-	out := make([]OperationSummary, 0, len(h.ops))
-	for name, op := range h.ops {
+	ops := h.runner.Operations()
+	out := make([]OperationSummary, 0, len(ops))
+	for name, op := range ops {
 		summary := OperationSummary{
 			Name:           name,
 			Description:    op.Description,
@@ -61,7 +62,8 @@ func (h *opHandlers) List(w http.ResponseWriter, r *http.Request) {
 // Run handles POST /operations/{name}/run (SSE stream)
 func (h *opHandlers) Run(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if _, ok := h.ops[name]; !ok {
+	ops := h.runner.Operations()
+	if _, ok := ops[name]; !ok {
 		httpError(w, "unknown operation: "+name, http.StatusNotFound)
 		return
 	}
@@ -85,7 +87,8 @@ func (h *opHandlers) Run(w http.ResponseWriter, r *http.Request) {
 // Cancels a currently running operation by cancelling its context.
 func (h *opHandlers) Cancel(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if _, ok := h.ops[name]; !ok {
+	ops := h.runner.Operations()
+	if _, ok := ops[name]; !ok {
 		httpError(w, "unknown operation: "+name, http.StatusNotFound)
 		return
 	}
@@ -119,7 +122,8 @@ func (h *opHandlers) AllHistory(w http.ResponseWriter, r *http.Request) {
 // History handles GET /operations/{name}/history
 func (h *opHandlers) History(w http.ResponseWriter, r *http.Request) {
 	name := r.PathValue("name")
-	if _, ok := h.ops[name]; !ok {
+	ops := h.runner.Operations()
+	if _, ok := ops[name]; !ok {
 		httpError(w, "unknown operation: "+name, http.StatusNotFound)
 		return
 	}

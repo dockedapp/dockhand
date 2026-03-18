@@ -95,6 +95,9 @@ func Update(w http.ResponseWriter, r *http.Request) {
 		"version": req.Version,
 		"message": "Update applied, restarting...",
 	})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 
 	go func() {
 		time.Sleep(500 * time.Millisecond)
@@ -112,6 +115,9 @@ func Restart(w http.ResponseWriter, r *http.Request) {
 		"success": true,
 		"message": "Restarting dockhand...",
 	})
+	if f, ok := w.(http.Flusher); ok {
+		f.Flush()
+	}
 
 	go func() {
 		time.Sleep(500 * time.Millisecond)
@@ -126,39 +132,52 @@ func Restart(w http.ResponseWriter, r *http.Request) {
 // Responds immediately, then asynchronously removes all dockhand files and
 // signals itself to exit cleanly. Files are deleted BEFORE the process stops
 // so the goroutine is never killed mid-way by systemd cgroup cleanup.
-func Uninstall(w http.ResponseWriter, r *http.Request) {
-	writeJSON(w, map[string]any{
-		"success": true,
-		"message": "Uninstalling dockhand...",
-	})
-
-	go func() {
-		time.Sleep(500 * time.Millisecond)
-		log.Printf("beginning uninstall")
-
-		// Disable service and remove all files first, while the process is still
-		// running. Do NOT call "systemctl stop" here — that sends SIGTERM to us,
-		// which kills this goroutine before cleanup finishes.
-		cmds := [][]string{
-			{"systemctl", "disable", "dockhand"},
-			{"rm", "-f", "/usr/local/bin/dockhand"},
-			{"rm", "-rf", "/etc/dockhand"},
-			{"rm", "-rf", "/var/lib/dockhand"},
-			{"rm", "-f", "/etc/systemd/system/dockhand.service"},
-			{"systemctl", "daemon-reload"},
+func Uninstall(histDB io.Closer) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, map[string]any{
+			"success": true,
+			"message": "Uninstalling dockhand...",
+		})
+		if f, ok := w.(http.Flusher); ok {
+			f.Flush()
 		}
-		for _, args := range cmds {
-			if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
-				log.Printf("uninstall: %s: %v: %s", args[0], err, out)
+
+		go func() {
+			time.Sleep(500 * time.Millisecond)
+			log.Printf("beginning uninstall")
+
+			// Close the history database before removing its files to avoid
+			// deleting files that are still open by SQLite.
+			if histDB != nil {
+				if err := histDB.Close(); err != nil {
+					log.Printf("uninstall: warning: closing history db: %v", err)
+				}
 			}
-		}
 
-		log.Printf("uninstall complete — signaling shutdown")
-		// SIGTERM ourselves. main.go catches it and exits with code 0.
-		// Since Restart=on-failure, a clean exit won't trigger a restart,
-		// and the unit file is already gone so systemd won't restart on boot.
-		_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
-	}()
+			// Disable service and remove all files first, while the process is still
+			// running. Do NOT call "systemctl stop" here — that sends SIGTERM to us,
+			// which kills this goroutine before cleanup finishes.
+			cmds := [][]string{
+				{"systemctl", "disable", "dockhand"},
+				{"rm", "-f", "/usr/local/bin/dockhand"},
+				{"rm", "-rf", "/etc/dockhand"},
+				{"rm", "-rf", "/var/lib/dockhand"},
+				{"rm", "-f", "/etc/systemd/system/dockhand.service"},
+				{"systemctl", "daemon-reload"},
+			}
+			for _, args := range cmds {
+				if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+					log.Printf("uninstall: %s: %v: %s", args[0], err, out)
+				}
+			}
+
+			log.Printf("uninstall complete — signaling shutdown")
+			// SIGTERM ourselves. main.go catches it and exits with code 0.
+			// Since Restart=on-failure, a clean exit won't trigger a restart,
+			// and the unit file is already gone so systemd won't restart on boot.
+			_ = syscall.Kill(os.Getpid(), syscall.SIGTERM)
+		}()
+	}
 }
 
 // Reload handles POST /reload
@@ -238,6 +257,8 @@ func downloadBinary(url, dest string) error {
 		return err
 	}
 	defer f.Close()
-	_, err = io.Copy(f, resp.Body)
-	return err
+	if _, err = io.Copy(f, resp.Body); err != nil {
+		return err
+	}
+	return f.Sync()
 }
