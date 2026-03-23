@@ -198,11 +198,11 @@ type AppOpConfig = config.AppOperation
 // the number of upgradable packages (0 if none or on error).
 // Uses lastNonEmptyLine to discard any login-shell MOTD/banner text.
 func (r *Runner) runSystemUpdateCheck(ctx context.Context, app config.App) (int, error) {
-	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", app.SystemUpdateCheck)
+	cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-c", app.SystemUpdateCheck)
 	cmd.Env = os.Environ()
-	out, err := cmd.CombinedOutput()
+	out, err := cmd.Output()
 	if err != nil {
-		log.Printf("system_update_check command error: %v, output: %q", err, string(out))
+		log.Printf("system_update_check command error: %v", err)
 		return 0, err
 	}
 	raw := lastNonEmptyLine(strings.TrimSpace(string(out)))
