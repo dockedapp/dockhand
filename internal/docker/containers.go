@@ -8,7 +8,6 @@ import (
 
 	"github.com/docker/docker/api/types"
 	"github.com/docker/docker/api/types/container"
-	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 )
 
@@ -57,13 +56,10 @@ type imageMetadata struct {
 	Created     int64
 }
 
-// ListContainers returns all running containers, enriched with RepoDigests and
+// ListContainers returns all containers (any state), enriched with RepoDigests and
 // image creation time from local images.
 func (dc *Client) ListContainers(ctx context.Context) ([]ContainerInfo, error) {
-	args := filters.NewArgs()
-	args.Add("status", "running")
-
-	raw, err := dc.c.ContainerList(ctx, container.ListOptions{Filters: args})
+	raw, err := dc.c.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
 		return nil, err
 	}
