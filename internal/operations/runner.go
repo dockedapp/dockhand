@@ -31,6 +31,8 @@ type Runner struct {
 	versionCache *VersionCache
 	configPath   string
 	stopRefresh  chan struct{}
+	sysUpdate    *sysUpdateTracker
+	aptChecker   aptChecker
 }
 
 // NewRunner creates a Runner with the given operations, apps, and history database.
@@ -47,6 +49,8 @@ func NewRunner(ops map[string]config.Operation, apps map[string]config.App, hist
 		versionCache: NewVersionCache(),
 		configPath:   configPath,
 		stopRefresh:  make(chan struct{}),
+		sysUpdate:    newSysUpdateTracker(),
+		aptChecker:   newAptChecker(),
 	}
 	go r.warmVersionCache()
 	go r.backgroundRefresh()
@@ -131,19 +135,11 @@ func (r *Runner) warmVersionCache() {
 			}(appName, app)
 		}
 
-		if app.SystemUpdateCheck != "" {
+		if app.SystemUpdates.Enabled() || app.SystemUpdateCheck != "" {
 			wg.Add(1)
 			go func(appName string, app config.App) {
 				defer wg.Done()
-				ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer cancel()
-				count, err := r.runSystemUpdateCheck(ctx, app)
-				if err != nil {
-					log.Printf("system_update_check failed for %q: %v", appName, err)
-					return
-				}
-				log.Printf("system_update_check for %q: %d upgradable", appName, count)
-				r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(count))
+				r.checkSystemUpdates(appName, app, false)
 			}(appName, app)
 		}
 	}
@@ -194,9 +190,67 @@ func (r *Runner) runVersionCommandStr(ctx context.Context, versionCommand string
 // AppOpConfig is used as a helper type alias for the version command runner.
 type AppOpConfig = config.AppOperation
 
-// runSystemUpdateCheck executes the system_update_check command and returns
-// the number of upgradable packages (0 if none or on error).
-// Uses lastNonEmptyLine to discard any login-shell MOTD/banner text.
+// checkSystemUpdates refreshes the upgradable-package count for an app using the
+// built-in checker (when system_updates is configured) or the freeform
+// system_update_check command. It records success/error state in the tracker so
+// a failed check never overwrites a known-good count, and republishes the count
+// to the version cache for the API. When force is true the built-in checker's
+// refresh interval is bypassed (used after an app operation completes).
+func (r *Runner) checkSystemUpdates(appName string, app config.App, force bool) {
+	if app.SystemUpdates.Enabled() {
+		interval := app.SystemUpdates.RefreshDuration()
+		if force {
+			r.sysUpdate.markAttempt(appName)
+		} else if !r.sysUpdate.tryAcquire(appName, interval) {
+			// Not time for a fresh index refresh yet — cheaply republish the
+			// last known good count so the API/version cache stay warm.
+			r.republishSystemUpdateCount(appName)
+			return
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), aptUpdateTimeout+aptSimulateTimeout)
+		defer cancel()
+		count, err := r.aptChecker.check(ctx)
+		if err != nil {
+			r.sysUpdate.recordError(appName, err)
+			log.Printf("system_updates (apt) check failed for %q: %v", appName, err)
+			// Keep the last good count published; don't clobber with 0.
+			r.republishSystemUpdateCount(appName)
+			return
+		}
+		r.sysUpdate.recordSuccess(appName, count)
+		r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(count))
+		log.Printf("system_updates (apt) for %q: %d upgradable", appName, count)
+		return
+	}
+
+	if app.SystemUpdateCheck != "" {
+		ctx, cancel := context.WithTimeout(context.Background(), 120*time.Second)
+		defer cancel()
+		count, err := r.runSystemUpdateCheck(ctx, app)
+		if err != nil {
+			r.sysUpdate.recordError(appName, err)
+			log.Printf("system_update_check failed for %q: %v", appName, err)
+			return
+		}
+		r.sysUpdate.recordSuccess(appName, count)
+		r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(count))
+		log.Printf("system_update_check for %q: %d upgradable", appName, count)
+	}
+}
+
+// republishSystemUpdateCount re-writes the last known good count to the version
+// cache so the API keeps reporting it between refreshes / across cache TTL.
+func (r *Runner) republishSystemUpdateCount(appName string) {
+	if info, ok := r.sysUpdate.info(appName); ok && info.HasCount {
+		r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(info.Count))
+	}
+}
+
+// runSystemUpdateCheck executes the freeform system_update_check command and
+// returns the number of upgradable packages. Uses lastNonEmptyLine to discard
+// any login-shell MOTD/banner text. A parse failure returns an error so that a
+// broken command is not silently reported as "0 updates".
 func (r *Runner) runSystemUpdateCheck(ctx context.Context, app config.App) (int, error) {
 	cmd := exec.CommandContext(ctx, "bash", "--noprofile", "--norc", "-c", app.SystemUpdateCheck)
 	cmd.Env = os.Environ()
@@ -208,8 +262,7 @@ func (r *Runner) runSystemUpdateCheck(ctx context.Context, app config.App) (int,
 	raw := lastNonEmptyLine(strings.TrimSpace(string(out)))
 	n, parseErr := strconv.Atoi(raw)
 	if parseErr != nil {
-		log.Printf("system_update_check parse error: raw output %q, err: %v", raw, parseErr)
-		return 0, nil
+		return 0, fmt.Errorf("system_update_check parse error: raw output %q: %w", raw, parseErr)
 	}
 	return n, nil
 }
@@ -459,14 +512,26 @@ func (r *Runner) CurrentAppVersion(appName string) string {
 }
 
 // SystemUpdateCount returns the number of upgradable packages for the named app,
-// or 0 if not tracked or not yet checked.
+// or 0 if not tracked or not yet checked. The tracker's last-good count is
+// preferred (it survives failed checks and the version-cache TTL); the version
+// cache is used as a fallback.
 func (r *Runner) SystemUpdateCount(appName string) int {
+	if info, ok := r.sysUpdate.info(appName); ok && info.HasCount {
+		return info.Count
+	}
 	v, ok := r.versionCache.Get("__sysupdate:" + appName)
 	if !ok {
 		return 0
 	}
 	n, _ := strconv.Atoi(v)
 	return n
+}
+
+// SystemUpdateInfo returns a snapshot of the app's system-update check state
+// (last good count, last successful check time, and last error). ok is false
+// when the app has never been checked.
+func (r *Runner) SystemUpdateInfo(appName string) (SystemUpdateInfo, bool) {
+	return r.sysUpdate.info(appName)
 }
 
 // SystemUpdatesAvailable returns whether system updates are available for the named app.
@@ -642,13 +707,9 @@ func (r *Runner) RunApp(ctx context.Context, appName, opName string, output func
 					r.mu.Unlock()
 				}
 			}
-			if currentApp.SystemUpdateCheck != "" {
-				sCtx, sCancel := context.WithTimeout(context.Background(), 30*time.Second)
-				defer sCancel()
-				count, err := r.runSystemUpdateCheck(sCtx, currentApp)
-				if err == nil {
-					r.versionCache.Set("__sysupdate:"+appName, strconv.Itoa(count))
-				}
+			if currentApp.SystemUpdates.Enabled() || currentApp.SystemUpdateCheck != "" {
+				// Force a fresh check: an app operation may have changed packages.
+				r.checkSystemUpdates(appName, currentApp, true)
 			}
 		}()
 	}

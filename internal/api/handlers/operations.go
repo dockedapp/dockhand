@@ -4,6 +4,7 @@ import (
 	"net/http"
 	"sort"
 	"strconv"
+	"time"
 
 	"github.com/dockedapp/dockhand/internal/operations"
 	"github.com/dockedapp/dockhand/internal/sse"
@@ -167,13 +168,15 @@ type AppOperationSummary struct {
 
 // AppSummary is the list-view representation of an app.
 type AppSummary struct {
-	Name                   string                `json:"name"`
-	Description            string                `json:"description"`
-	CurrentVersion         string                `json:"currentVersion,omitempty"`
-	VersionSource          *VersionSourceInfo    `json:"versionSource,omitempty"`
-	SystemUpdatesAvailable bool                  `json:"systemUpdatesAvailable"`
-	SystemUpdateCount      int                   `json:"systemUpdateCount,omitempty"`
-	Operations             []AppOperationSummary `json:"operations"`
+	Name                    string                `json:"name"`
+	Description             string                `json:"description"`
+	CurrentVersion          string                `json:"currentVersion,omitempty"`
+	VersionSource           *VersionSourceInfo    `json:"versionSource,omitempty"`
+	SystemUpdatesAvailable  bool                  `json:"systemUpdatesAvailable"`
+	SystemUpdateCount       int                   `json:"systemUpdateCount,omitempty"`
+	SystemUpdateLastChecked *time.Time            `json:"systemUpdateLastChecked,omitempty"`
+	SystemUpdateError       string                `json:"systemUpdateError,omitempty"`
+	Operations              []AppOperationSummary `json:"operations"`
 }
 
 // List handles GET /apps
@@ -187,6 +190,13 @@ func (h *appHandlers) List(w http.ResponseWriter, r *http.Request) {
 			CurrentVersion:         h.runner.CurrentAppVersion(name),
 			SystemUpdatesAvailable: h.runner.SystemUpdatesAvailable(name),
 			SystemUpdateCount:      h.runner.SystemUpdateCount(name),
+		}
+		if info, ok := h.runner.SystemUpdateInfo(name); ok {
+			if !info.LastChecked.IsZero() {
+				lc := info.LastChecked
+				summary.SystemUpdateLastChecked = &lc
+			}
+			summary.SystemUpdateError = info.LastError
 		}
 		if app.VersionSource != nil {
 			summary.VersionSource = &VersionSourceInfo{

@@ -48,3 +48,32 @@ docker:
 #     command: "systemctl restart myapp"
 #     description: "Restart the service"
 #     timeout: 30
+
+# Apps — named managed services surfaced in the Docked UI. Each app can report a
+# count of pending OS package updates for its host/LXC.
+#
+# apps:
+#   myhost:
+#     description: "Ubuntu host"
+#
+#     # OS update reporting — choose ONE of the two options below.
+#
+#     # Option A (recommended for Debian/Ubuntu): built-in apt checker. Unlike a
+#     # freeform command, it refreshes the package index itself so counts never
+#     # go stale. Requires the runner to run as root.
+#     system_updates:
+#       type: apt              # only "apt" is supported for now
+#       refresh_interval: 6h   # how often to run "apt-get update"; default 6h, min 15m
+#
+#     # Option B: freeform command that prints the number of upgradable packages
+#     # to stdout. Use for non-apt systems. NOTE: most such commands only read the
+#     # local package cache — schedule your own index refresh (e.g. a cron
+#     # "apt-get update") or counts will be stale. If both options are set, the
+#     # built-in checker wins and this command is ignored (a warning is logged).
+#     # system_update_check: "apt list --upgradable 2>/dev/null | grep -cF '[upgradable' || true"
+#
+#     operations:
+#       update:
+#         label: "Update packages"
+#         command: "apt-get -y dist-upgrade"
+#         timeout: 600

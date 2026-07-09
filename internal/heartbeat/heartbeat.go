@@ -76,13 +76,26 @@ func run(ctx context.Context, cfg *config.Config, version string, dockerOK func(
 	for {
 		err := sendHeartbeat(cfg, version, dockerOK)
 		if err != nil {
-			// On 401, attempt automatic re-enrollment before giving up
+			// On 401, attempt automatic re-enrollment before backing off.
 			if isFatal(err) {
 				log.Printf("heartbeat: got 401 — attempting automatic re-enrollment with Docked server")
 				if reErr := enrollment.ReEnroll(cfg); reErr != nil {
-					log.Printf("heartbeat: re-enrollment failed: %v", reErr)
-					log.Println("heartbeat: stopping heartbeat. To fix: generate a new enrollment token in Docked and redeploy this runner.")
-					return
+					// Re-enrollment failed. Never give up — the server (or a
+					// proxy in front of it) may recover, so keep looping and
+					// re-attempt re-enrollment on the next 401. Back off so we
+					// don't hammer the server.
+					consecutiveFailures++
+					backoff := calcBackoff(consecutiveFailures)
+					log.Printf("heartbeat: re-enrollment failed (%d consecutive): %v — retrying in %s",
+						consecutiveFailures, reErr, backoff)
+					log.Println("heartbeat: if this persists, generate a new enrollment token in Docked and redeploy this runner.")
+
+					select {
+					case <-time.After(backoff):
+					case <-ctx.Done():
+						return
+					}
+					continue
 				}
 				log.Println("heartbeat: re-enrollment succeeded — resuming heartbeat")
 				consecutiveFailures = 0
@@ -145,15 +158,21 @@ func sendHeartbeat(cfg *config.Config, version string, dockerOK func() bool) err
 	}
 	defer resp.Body.Close()
 
+	// Check the status code BEFORE decoding the body. A 401 from a reverse
+	// proxy may carry an empty or HTML body that fails JSON decoding — we must
+	// still classify it as fatal so the run loop attempts re-enrollment.
+	if resp.StatusCode == http.StatusUnauthorized {
+		// Best-effort decode for a nicer error message; tolerate failure.
+		var result heartbeatResponse
+		_ = json.NewDecoder(resp.Body).Decode(&result)
+		// Server doesn't recognize our API key. The caller (run loop)
+		// will attempt automatic re-enrollment.
+		return &fatalError{fmt.Errorf("server returned 401: %s", result.Error)}
+	}
+
 	var result heartbeatResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return fmt.Errorf("decoding response (status %d): %w", resp.StatusCode, err)
-	}
-
-	if resp.StatusCode == http.StatusUnauthorized {
-		// Server doesn't recognize our API key. The caller (run loop)
-		// will attempt automatic re-enrollment before giving up.
-		return &fatalError{fmt.Errorf("server returned 401: %s", result.Error)}
 	}
 
 	if resp.StatusCode != http.StatusOK || !result.Success {

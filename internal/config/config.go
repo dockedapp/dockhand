@@ -4,10 +4,12 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strconv"
 	"strings"
+	"time"
 
 	"gopkg.in/yaml.v3"
 )
@@ -19,6 +21,10 @@ const (
 	defaultOpTimeout     = 300
 	dataDir              = "/var/lib/dockhand"
 	apiKeyFile           = "/var/lib/dockhand/.api_key"
+
+	// System-update built-in checker bounds.
+	defaultSysUpdateRefresh = 6 * time.Hour
+	minSysUpdateRefresh     = 15 * time.Minute
 )
 
 type Config struct {
@@ -44,8 +50,44 @@ type App struct {
 	VersionCommand    string                  `yaml:"version_command,omitempty"`
 	VersionSource     *VersionSource          `yaml:"version_source,omitempty"`
 	SystemUpdateCheck string                  `yaml:"system_update_check,omitempty"`
+	SystemUpdates     *SystemUpdates          `yaml:"system_updates,omitempty"`
 	PackageManager    string                  `yaml:"package_manager,omitempty"`
 	Operations        map[string]AppOperation `yaml:"operations"`
+}
+
+// SystemUpdates configures the built-in OS package update checker for an app.
+// Unlike the freeform SystemUpdateCheck command, the built-in checker refreshes
+// the package index itself (e.g. runs "apt-get update") so counts don't go stale.
+type SystemUpdates struct {
+	// Type selects the built-in checker. Only "apt" is supported for now.
+	Type string `yaml:"type"`
+	// RefreshInterval controls how often the package index is refreshed
+	// (e.g. "6h"). Default 6h, minimum 15m.
+	RefreshInterval string `yaml:"refresh_interval,omitempty"`
+}
+
+// Enabled reports whether the built-in checker is configured with a supported type.
+func (su *SystemUpdates) Enabled() bool {
+	if su == nil {
+		return false
+	}
+	return strings.ToLower(strings.TrimSpace(su.Type)) == "apt"
+}
+
+// RefreshDuration returns the effective refresh interval, applying the default
+// (6h) when unset/unparseable and clamping to the minimum (15m).
+func (su *SystemUpdates) RefreshDuration() time.Duration {
+	if su == nil || strings.TrimSpace(su.RefreshInterval) == "" {
+		return defaultSysUpdateRefresh
+	}
+	d, err := time.ParseDuration(strings.TrimSpace(su.RefreshInterval))
+	if err != nil || d <= 0 {
+		return defaultSysUpdateRefresh
+	}
+	if d < minSysUpdateRefresh {
+		return minSysUpdateRefresh
+	}
+	return d
 }
 
 // packageManagerCommands maps package manager names to shell commands that
@@ -184,6 +226,14 @@ func applyDefaults(cfg *Config) {
 		if app.PackageManager != "" {
 			if cmd, ok := packageManagerCommands[strings.ToLower(app.PackageManager)]; ok {
 				app.SystemUpdateCheck = cmd
+			}
+		}
+		// Built-in system_updates checker: validate type and warn on conflicts.
+		if app.SystemUpdates != nil {
+			if !app.SystemUpdates.Enabled() {
+				log.Printf("app %q: unsupported system_updates.type %q (only \"apt\" is supported); ignoring built-in checker", appName, app.SystemUpdates.Type)
+			} else if app.SystemUpdateCheck != "" {
+				log.Printf("app %q: both system_updates and system_update_check are set; built-in checker wins, ignoring system_update_check", appName)
 			}
 		}
 		cfg.Apps[appName] = app
