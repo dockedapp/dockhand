@@ -5,7 +5,7 @@ import (
 	"time"
 )
 
-const versionCacheTTL = 5 * time.Minute
+const versionCacheTTL = 20 * time.Minute
 
 type versionEntry struct {
 	version   string

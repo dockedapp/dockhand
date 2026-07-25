@@ -56,6 +56,13 @@ docker:
 #   myhost:
 #     description: "Ubuntu host"
 #
+#     # Version tracking — detect current and latest versions.
+#     version_command: "myapp --version"        # shell command that prints current version
+#     version_source:
+#       type: github                            # "github" or "command"
+#       repo: "owner/repo"                      # (github) latest release tag
+#       # command: "curl -s https://example.com/latest"  # (command) shell command that prints latest version
+#
 #     # OS update reporting — choose ONE of the two options below.
 #
 #     # Option A (recommended for Debian/Ubuntu): built-in apt checker. Unlike a

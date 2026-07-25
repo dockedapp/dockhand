@@ -24,7 +24,7 @@ func NewOperationHandlers(runner *operations.Runner) *opHandlers {
 // VersionSourceInfo is the JSON representation of a version source.
 type VersionSourceInfo struct {
 	Type string `json:"type"`
-	Repo string `json:"repo"`
+	Repo string `json:"repo,omitempty"`
 }
 
 // OperationSummary is the list-view representation of an operation.
@@ -34,6 +34,7 @@ type OperationSummary struct {
 	Active         bool                      `json:"active"`
 	LastRun        *operations.HistoryRecord `json:"lastRun,omitempty"`
 	CurrentVersion string                    `json:"currentVersion,omitempty"`
+	LatestVersion  string                    `json:"latestVersion,omitempty"`
 	VersionSource  *VersionSourceInfo        `json:"versionSource,omitempty"`
 }
 
@@ -48,6 +49,7 @@ func (h *opHandlers) List(w http.ResponseWriter, r *http.Request) {
 			Active:         h.runner.IsActive(name),
 			LastRun:        h.runner.LastRun(name),
 			CurrentVersion: h.runner.CurrentVersion(name),
+			LatestVersion:  h.runner.LatestVersion(name),
 		}
 		if op.VersionSource != nil {
 			summary.VersionSource = &VersionSourceInfo{
@@ -171,6 +173,7 @@ type AppSummary struct {
 	Name                    string                `json:"name"`
 	Description             string                `json:"description"`
 	CurrentVersion          string                `json:"currentVersion,omitempty"`
+	LatestVersion           string                `json:"latestVersion,omitempty"`
 	VersionSource           *VersionSourceInfo    `json:"versionSource,omitempty"`
 	SystemUpdatesAvailable  bool                  `json:"systemUpdatesAvailable"`
 	SystemUpdateCount       int                   `json:"systemUpdateCount,omitempty"`
@@ -188,6 +191,7 @@ func (h *appHandlers) List(w http.ResponseWriter, r *http.Request) {
 			Name:                   name,
 			Description:            app.Description,
 			CurrentVersion:         h.runner.CurrentAppVersion(name),
+			LatestVersion:          h.runner.LatestAppVersion(name),
 			SystemUpdatesAvailable: h.runner.SystemUpdatesAvailable(name),
 			SystemUpdateCount:      h.runner.SystemUpdateCount(name),
 		}

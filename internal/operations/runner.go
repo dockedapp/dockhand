@@ -111,7 +111,27 @@ func (r *Runner) warmVersionCache() {
 		}(name, op)
 	}
 
-	// Apps: version_command + system_update_check
+	// Legacy operations: version_source command
+	for name, op := range ops {
+		if op.VersionSource != nil && op.VersionSource.Type == "command" && op.VersionSource.Command != "" {
+			wg.Add(1)
+			go func(name string, op config.Operation) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				v, err := r.runVersionSourceCommand(ctx, op.VersionSource.Command, op.WorkingDir)
+				if err != nil {
+					log.Printf("version_source command failed for %q: %v", name, err)
+					return
+				}
+				if v != "" {
+					r.versionCache.Set("__latest:"+name, v)
+				}
+			}(name, op)
+		}
+	}
+
+	// Apps: version_command + version_source command + system_update_check
 	for appName, app := range apps {
 		if app.VersionCommand != "" {
 			wg.Add(1)
@@ -135,6 +155,23 @@ func (r *Runner) warmVersionCache() {
 			}(appName, app)
 		}
 
+		if app.VersionSource != nil && app.VersionSource.Type == "command" && app.VersionSource.Command != "" {
+			wg.Add(1)
+			go func(appName string, app config.App) {
+				defer wg.Done()
+				ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+				defer cancel()
+				v, err := r.runVersionSourceCommand(ctx, app.VersionSource.Command, "")
+				if err != nil {
+					log.Printf("version_source command failed for app %q: %v", appName, err)
+					return
+				}
+				if v != "" {
+					r.versionCache.Set("__latest:"+appName, v)
+				}
+			}(appName, app)
+		}
+
 		if app.SystemUpdates.Enabled() || app.SystemUpdateCheck != "" {
 			wg.Add(1)
 			go func(appName string, app config.App) {
@@ -151,7 +188,7 @@ func (r *Runner) warmVersionCache() {
 // version cache populated. This ensures system_update_check results and
 // version_command results remain available between config reloads.
 func (r *Runner) backgroundRefresh() {
-	ticker := time.NewTicker(4 * time.Minute)
+	ticker := time.NewTicker(15 * time.Minute)
 	defer ticker.Stop()
 	for {
 		select {
@@ -509,6 +546,35 @@ func (r *Runner) CurrentAppVersion(appName string) string {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	return r.apps[appName].CurrentVersion
+}
+
+// LatestVersion returns the cached latest version for a legacy operation
+// (populated by version_source type: command).
+func (r *Runner) LatestVersion(name string) string {
+	v, _ := r.versionCache.Get("__latest:" + name)
+	return v
+}
+
+// LatestAppVersion returns the cached latest version for an app
+// (populated by version_source type: command).
+func (r *Runner) LatestAppVersion(appName string) string {
+	v, _ := r.versionCache.Get("__latest:" + appName)
+	return v
+}
+
+// runVersionSourceCommand executes a shell command to determine the latest
+// available version. Returns the last non-empty line of stdout.
+func (r *Runner) runVersionSourceCommand(ctx context.Context, command string, workingDir string) (string, error) {
+	cmd := exec.CommandContext(ctx, "bash", "-l", "-c", command)
+	if workingDir != "" {
+		cmd.Dir = workingDir
+	}
+	cmd.Env = os.Environ()
+	out, err := cmd.Output()
+	if err != nil {
+		return "", err
+	}
+	return lastNonEmptyLine(strings.TrimSpace(string(out))), nil
 }
 
 // SystemUpdateCount returns the number of upgradable packages for the named app,

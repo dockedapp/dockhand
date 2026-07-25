@@ -124,8 +124,9 @@ type DockerConfig struct {
 }
 
 type VersionSource struct {
-	Type string `yaml:"type"` // "github"
-	Repo string `yaml:"repo"` // "owner/repo"
+	Type    string `yaml:"type"`              // "github" or "command"
+	Repo    string `yaml:"repo,omitempty"`    // "owner/repo" (github)
+	Command string `yaml:"command,omitempty"` // shell command that prints latest version (command)
 }
 
 type Operation struct {
