@@ -26,6 +26,7 @@ func safeHTTPClient(originalHost string) *http.Client {
 		"github.com":                            true,
 		"objects.githubusercontent.com":         true,
 		"github-releases.githubusercontent.com": true,
+		"release-assets.githubusercontent.com":  true,
 	}
 	return &http.Client{
 		Timeout: 5 * time.Minute,
