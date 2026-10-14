@@ -31,6 +31,7 @@ type VersionSourceInfo struct {
 type OperationSummary struct {
 	Name           string                    `json:"name"`
 	Description    string                    `json:"description"`
+	Command        string                    `json:"command,omitempty"`
 	Active         bool                      `json:"active"`
 	LastRun        *operations.HistoryRecord `json:"lastRun,omitempty"`
 	CurrentVersion string                    `json:"currentVersion,omitempty"`
@@ -46,6 +47,7 @@ func (h *opHandlers) List(w http.ResponseWriter, r *http.Request) {
 		summary := OperationSummary{
 			Name:           name,
 			Description:    op.Description,
+			Command:        op.Command,
 			Active:         h.runner.IsActive(name),
 			LastRun:        h.runner.LastRun(name),
 			CurrentVersion: h.runner.CurrentVersion(name),
@@ -164,6 +166,7 @@ func NewAppHandlers(runner *operations.Runner) *appHandlers {
 type AppOperationSummary struct {
 	Name    string                    `json:"name"`
 	Label   string                    `json:"label"`
+	Command string                    `json:"command,omitempty"`
 	Active  bool                      `json:"active"`
 	LastRun *operations.HistoryRecord `json:"lastRun,omitempty"`
 }
@@ -213,6 +216,7 @@ func (h *appHandlers) List(w http.ResponseWriter, r *http.Request) {
 			ops = append(ops, AppOperationSummary{
 				Name:    opName,
 				Label:   op.Label,
+				Command: op.Command,
 				Active:  h.runner.IsAppActive(name, opName),
 				LastRun: h.runner.LastAppRun(name, opName),
 			})
