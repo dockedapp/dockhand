@@ -364,7 +364,15 @@ func (r *Runner) Run(ctx context.Context, name string, output func(string)) (*Ru
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	// Persistent operations are detached from the request context so a client
+	// disconnect (e.g. docked restarting when an update restarts the Docker
+	// daemon) does not kill the command mid-run. It then runs to completion or
+	// timeout, and its real exit code is persisted to history for reconciliation.
+	parent := ctx
+	if op.Persistent {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 
 	r.mu.Lock()
 	r.cancels[name] = cancel
@@ -662,7 +670,15 @@ func (r *Runner) RunApp(ctx context.Context, appName, opName string, output func
 	if timeout <= 0 {
 		timeout = 5 * time.Minute
 	}
-	ctx, cancel := context.WithTimeout(ctx, timeout)
+	// Persistent operations are detached from the request context so a client
+	// disconnect (e.g. docked restarting when an update restarts the Docker
+	// daemon) does not kill the command mid-run. It then runs to completion or
+	// timeout, and its real exit code is persisted to history for reconciliation.
+	parent := ctx
+	if op.Persistent {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, timeout)
 
 	r.mu.Lock()
 	r.appsCancels[key] = cancel

@@ -81,6 +81,11 @@ docker:
 #     description: "Deploy latest build"
 #     timeout: 300          # seconds; default 300
 #     working_dir: "/"
+#     persistent: false     # if true, the command keeps running even if Docked
+#                           # disconnects mid-run (e.g. an update that restarts
+#                           # the Docker daemon hosting Docked); its real exit
+#                           # code is saved to history for Docked to reconcile.
+#                           # Default timeout for persistent ops is 3600s.
 #
 #     # Optional: version tracking (Tier 2 — GitHub releases)
 #     current_version: "v1.4.2"

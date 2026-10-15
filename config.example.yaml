@@ -43,6 +43,9 @@ docker:
 #     description: "Update this service to the latest version"
 #     timeout: 300        # seconds (default: 300)
 #     working_dir: "/"    # working directory for the command
+#     # persistent: true  # keep running even if Docked disconnects mid-run
+#                         # (e.g. an update that restarts the Docker daemon
+#                         # hosting Docked). Default timeout becomes 3600s.
 #
 #   restart:
 #     command: "systemctl restart myapp"
@@ -84,3 +87,10 @@ docker:
 #         label: "Update packages"
 #         command: "apt-get -y dist-upgrade"
 #         timeout: 600
+#         # persistent: keep the command running even if the client (Docked)
+#         # disconnects mid-run — e.g. when the upgrade restarts the Docker
+#         # daemon that hosts Docked. The command then runs to completion (or
+#         # timeout) and its real exit code is saved to history, which Docked
+#         # reconciles when it reconnects. Default timeout for persistent ops
+#         # is 3600s. Recommended for any operation that can restart Docked.
+#         persistent: true

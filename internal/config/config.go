@@ -19,8 +19,12 @@ const (
 	defaultSocket        = "/var/run/docker.sock"
 	defaultComposeBinary = "docker"
 	defaultOpTimeout     = 300
-	dataDir              = "/var/lib/dockhand"
-	apiKeyFile           = "/var/lib/dockhand/.api_key"
+	// Persistent operations run detached from the request context, so they get
+	// a longer default timeout — a system update that restarts the Docker daemon
+	// (and thereby docked) can otherwise take many minutes to finish.
+	defaultPersistentOpTimeout = 3600
+	dataDir                    = "/var/lib/dockhand"
+	apiKeyFile                 = "/var/lib/dockhand/.api_key"
 
 	// System-update built-in checker bounds.
 	defaultSysUpdateRefresh = 6 * time.Hour
@@ -41,6 +45,11 @@ type AppOperation struct {
 	Command    string `yaml:"command"`
 	Timeout    int    `yaml:"timeout"`
 	WorkingDir string `yaml:"working_dir"`
+	// Persistent detaches the command from the HTTP request context so it keeps
+	// running (to completion or timeout) even if the client disconnects — e.g.
+	// when a system update restarts the Docker daemon that hosts docked. Its
+	// real exit code is persisted to history so the caller can reconcile.
+	Persistent bool `yaml:"persistent,omitempty"`
 }
 
 // App is a named managed service with one or more runnable operations.
@@ -134,6 +143,7 @@ type Operation struct {
 	Description    string         `yaml:"description"`
 	Timeout        int            `yaml:"timeout"`
 	WorkingDir     string         `yaml:"working_dir"`
+	Persistent     bool           `yaml:"persistent,omitempty"`
 	CurrentVersion string         `yaml:"current_version,omitempty"`
 	VersionCommand string         `yaml:"version_command,omitempty"`
 	VersionSource  *VersionSource `yaml:"version_source,omitempty"`
@@ -201,7 +211,11 @@ func applyDefaults(cfg *Config) {
 	}
 	for name, op := range cfg.Operations {
 		if op.Timeout == 0 {
-			op.Timeout = defaultOpTimeout
+			if op.Persistent {
+				op.Timeout = defaultPersistentOpTimeout
+			} else {
+				op.Timeout = defaultOpTimeout
+			}
 		}
 		if op.WorkingDir == "" {
 			op.WorkingDir = "/"
@@ -211,7 +225,11 @@ func applyDefaults(cfg *Config) {
 	for appName, app := range cfg.Apps {
 		for opName, op := range app.Operations {
 			if op.Timeout == 0 {
-				op.Timeout = defaultOpTimeout
+				if op.Persistent {
+					op.Timeout = defaultPersistentOpTimeout
+				} else {
+					op.Timeout = defaultOpTimeout
+				}
 			}
 			if op.WorkingDir == "" {
 				op.WorkingDir = "/"
@@ -261,6 +279,7 @@ func migrateOperationsToApps(cfg *Config) {
 					Command:    op.Command,
 					Timeout:    op.Timeout,
 					WorkingDir: op.WorkingDir,
+					Persistent: op.Persistent,
 				},
 			},
 		}

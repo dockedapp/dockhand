@@ -32,6 +32,7 @@ type OperationSummary struct {
 	Name           string                    `json:"name"`
 	Description    string                    `json:"description"`
 	Command        string                    `json:"command,omitempty"`
+	Persistent     bool                      `json:"persistent,omitempty"`
 	Active         bool                      `json:"active"`
 	LastRun        *operations.HistoryRecord `json:"lastRun,omitempty"`
 	CurrentVersion string                    `json:"currentVersion,omitempty"`
@@ -48,6 +49,7 @@ func (h *opHandlers) List(w http.ResponseWriter, r *http.Request) {
 			Name:           name,
 			Description:    op.Description,
 			Command:        op.Command,
+			Persistent:     op.Persistent,
 			Active:         h.runner.IsActive(name),
 			LastRun:        h.runner.LastRun(name),
 			CurrentVersion: h.runner.CurrentVersion(name),
@@ -164,11 +166,12 @@ func NewAppHandlers(runner *operations.Runner) *appHandlers {
 
 // AppOperationSummary is the list-view representation of a single app operation.
 type AppOperationSummary struct {
-	Name    string                    `json:"name"`
-	Label   string                    `json:"label"`
-	Command string                    `json:"command,omitempty"`
-	Active  bool                      `json:"active"`
-	LastRun *operations.HistoryRecord `json:"lastRun,omitempty"`
+	Name       string                    `json:"name"`
+	Label      string                    `json:"label"`
+	Command    string                    `json:"command,omitempty"`
+	Persistent bool                      `json:"persistent,omitempty"`
+	Active     bool                      `json:"active"`
+	LastRun    *operations.HistoryRecord `json:"lastRun,omitempty"`
 }
 
 // AppSummary is the list-view representation of an app.
@@ -214,11 +217,12 @@ func (h *appHandlers) List(w http.ResponseWriter, r *http.Request) {
 		ops := make([]AppOperationSummary, 0, len(app.Operations))
 		for opName, op := range app.Operations {
 			ops = append(ops, AppOperationSummary{
-				Name:    opName,
-				Label:   op.Label,
-				Command: op.Command,
-				Active:  h.runner.IsAppActive(name, opName),
-				LastRun: h.runner.LastAppRun(name, opName),
+				Name:       opName,
+				Label:      op.Label,
+				Command:    op.Command,
+				Persistent: op.Persistent,
+				Active:     h.runner.IsAppActive(name, opName),
+				LastRun:    h.runner.LastAppRun(name, opName),
 			})
 		}
 		// Sort ops by name for deterministic ordering
